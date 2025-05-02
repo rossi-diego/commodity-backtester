@@ -1,0 +1,11 @@
+# Ignore virtual environments
+.venv/
+env/
+__pycache__/
+.ipynb_checkpoints/
+
+# Ignore data or output folders
+
+
+# Ignore system files
+.DS_Store
