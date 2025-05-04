@@ -1,5 +1,8 @@
 # 📈 Commodity Backtester
 
+[![View App](https://img.shields.io/badge/🚀%20Open%20App%20on-Streamlit-ff4b4b?style=for-the-badge&logo=streamlit&logoColor=white)](https://commodity-backtester.streamlit.app/)
+
+
 This project provides an interactive environment for backtesting trading strategies focused on commodities. Users can test historical performance using customizable parameters, review detailed metrics, and visualize trade signals on charts.
 
 > 💡 While the initial implementation supports spread-based strategies, the architecture is designed to accommodate various other trading models in the future.
