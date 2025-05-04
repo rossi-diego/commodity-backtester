@@ -6,6 +6,7 @@ streamlit>=1.25
 openpyxl>=3.1
 jupyterlab>=3.5
 ipykernel>=6.15
+plotly>=5.0.0
 scikit-learn>=1.2
 seaborn>=0.12
 requests>=2.31
