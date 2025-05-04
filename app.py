@@ -6,11 +6,11 @@ import datetime
 import pandas as pd
 import streamlit as st
 
-from constants import commodities_dict, contract_sizes, tons_conversion
-from data_loader import yahoo_quotes
-from strategy import backtest
-from utils import pnl_trades, backtest_performance, strategy_describe
-from visualization import backtest_charts
+from src.constants import commodities_dict, contract_sizes, tons_conversion
+from src.data_loader import yahoo_quotes
+from src.strategy import backtest
+from src.utils import pnl_trades, backtest_performance, strategy_describe
+from src.visualization import backtest_charts
 
 st.set_page_config(page_title="Commodity Backtester", layout="wide")
 
