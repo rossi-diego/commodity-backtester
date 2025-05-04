@@ -45,7 +45,13 @@ def pnl_trades(df_trades, df_prices, commodity_chosen, tons_conversion, contract
     return df_trades, mtm_trade
 
 
-def backtest_performance(df_trades, df_prices, mtm_trade=None):
+
+import numpy as np
+import pandas as pd
+
+def backtest_performance(df_trades, df_prices, mtm_trade=None,
+                         contract_size=None, tons_conversion=None, commodity_chosen=None, position_open=None):
+
     total_complete_trades = int(len(df_trades) / 2)
     realized_profit = df_trades['pnl_usd'].sum()
     mtm_profit = mtm_trade['pnl_usd'] if mtm_trade else 0
@@ -72,13 +78,22 @@ def backtest_performance(df_trades, df_prices, mtm_trade=None):
 
     backtest_duration = (df_prices.index[-1] - df_prices.index[0]).days
 
+    gross_exposure = 0
+    if position_open and not df_trades.empty and 'position' in df_trades.columns:
+        if df_trades.iloc[-1]['position'] == 'buy':
+            gross_exposure = contract_size * tons_conversion[commodity_chosen] * df_prices[commodity_chosen].iloc[-1]
+
+    df_prices['returns'] = df_prices[commodity_chosen].pct_change()
+    var_95 = np.percentile(df_prices['returns'].dropna(), 5) * gross_exposure
+
     performance_summary = pd.DataFrame({
         'Metric': [
             'Total Buys', 'Total Sells', 'Complete Trades', 'Open Positions',
             'Realized Profit (USD)', 'MTM Adjustment (USD)', 'Total Profit (USD)',
             'Win Rate (%)', 'Max Drawdown (USD)', 'Sharpe Ratio',
             'Best Trade (USD)', 'Worst Trade (USD)',
-            'Mean Trade Duration (days)', 'Backtest Duration (days)'
+            'Mean Trade Duration (days)', 'Backtest Duration (days)',
+            'Gross Exposure (USD)', 'VaR 95% (Historical - USD)'
         ],
         'Value': [
             (df_trades['position'] == 'buy').sum(),
@@ -94,21 +109,34 @@ def backtest_performance(df_trades, df_prices, mtm_trade=None):
             best_trade,
             worst_trade,
             mean_trade_duration,
-            backtest_duration
+            backtest_duration,
+            gross_exposure,
+            var_95
         ]
     })
 
-    return performance_summary
+    return performance_summary.round(2)
+
+
 
 def strategy_describe(df, tons_conversion, backtest_strategy=None):
     if backtest_strategy != 'spread':
-        return pd.DataFrame(index=df.index)  # retorna vazio
+        return pd.DataFrame(index=df.index)
 
-    spreads = pd.DataFrame(index=df.index)
+    summary_list = []
 
     for col1, col2 in permutations(df.columns, 2):
         if col1 in tons_conversion and col2 in tons_conversion:
             spread_name = f"{col1}/{col2}"
-            spreads[spread_name] = (df[col1] * tons_conversion[col1]) / (df[col2] * tons_conversion[col2])
+            spread_series = (df[col1] * tons_conversion[col1]) / (df[col2] * tons_conversion[col2])
 
-    return spreads
+            stats = spread_series.describe()
+            stats["coefficient variation"] = stats["std"] / stats["mean"]
+            stats.name = spread_name 
+            summary_list.append(stats)
+
+    if not summary_list:
+        return pd.DataFrame()
+
+    summary_df = pd.DataFrame(summary_list)
+    return summary_df.round(4)

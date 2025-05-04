@@ -1,49 +1,71 @@
-# 🧠 Commodity Trading Strategy Backtester
+# 📈 Commodity Backtester
 
-A modular and extensible Python project designed for backtesting commodity trading strategies, starting with spread-based logic and prepared for future expansion into other models and data sources.
+This project provides an interactive environment for backtesting trading strategies focused on commodities. Users can test historical performance using customizable parameters, review detailed metrics, and visualize trade signals on charts.
 
-## 🚀 Features
-
-- 📥 Market data collection via Yahoo Finance
-- ⚖️ Spread calculation between multiple commodities
-- 🧠 Strategy simulation with customizable entry/exit thresholds
-- 💰 Profit & Loss computation including open positions (MTM)
-- 📈 Interactive visualizations with Matplotlib
-- 🧩 Modular architecture ready for integration with Streamlit
-
-## 🗂 Project Structure
-
-```
-project-root/
-├── notebooks/           # Interactive notebooks for exploration and backtesting
-├── src/                 # Main source code
-│   ├── config.py            # Directory paths and file references
-│   ├── constants.py         # Commodity metadata (tickers, contract sizes, unit converters)
-│   ├── data_loader.py       # Data ingestion (e.g., Yahoo Finance)
-│   ├── strategy.py          # Strategy execution (initial: spread-based)
-│   ├── utils.py             # PnL calculations, performance metrics
-│   ├── visualization.py     # Backtest charts (price, spread, PnL)
-├── requirements.txt     # Project dependencies
-```
-
-## ⚙️ Requirements
-
-- Python 3.11+
-
-## ▶️ How to Run
-
-```bash
-python -m venv .venv
-source .venv/bin/activate        # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-## 📘 Notebooks
-
-Explore the strategy in action using the interactive notebooks inside the `notebooks/` directory. The main one is:
-
-- `02-backtest.ipynb` – Full backtest pipeline and chart generation
+> 💡 While the initial implementation supports spread-based strategies, the architecture is designed to accommodate various other trading models in the future.
 
 ---
 
-Built by Diego Rossi – a personal initiative to model and evaluate commodity trading strategies. 💼📉📊
+## 🔍 Features
+
+- Interactive backtest tool for commodity trading strategies  
+- Modular and extensible design to support multiple strategies (e.g. Spread, Mean Reversion, Momentum)  
+- Clean, responsive interface built with **Streamlit**  
+- Historical trade metrics: Realized PnL, Drawdown, Sharpe Ratio, Win Rate  
+- Interactive trade signal charts with buy/sell markers  
+- Descriptive statistics of selected commodity prices and spreads
+
+---
+
+## 📊 Data Sources
+
+The app currently retrieves historical price data using the **Yahoo Finance API** via `yfinance`.  
+
+> 📌 Future versions will include support for additional data providers (e.g. **Quandl**, **USDA**, **Bloomberg**, **Eikon**) to enable broader market coverage and integrate fundamental data (e.g. crush margins, export volumes, stocks/use).
+
+---
+
+## 🛠️ Installation
+
+Clone the repository and install the requirements:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## ▶️ Run the App
+
+```bash
+streamlit run app.py
+```
+
+---
+
+## 🗂️ Project Structure
+
+```
+├── app.py                # Streamlit app interface
+├── src/
+│   ├── strategy.py       # Trading strategy logic
+│   ├── utils.py          # PnL and metrics calculations
+│   ├── constants.py      # Contract sizes, naming, conversion factors
+│   ├── data_loader.py    # Data loading logic (Yahoo Finance)
+│   ├── visualization.py  # Plotting and chart rendering
+├── requirements.txt
+├── README.md
+```
+
+---
+
+## 🧠 Purpose
+
+This project was built to simulate and evaluate commodity-based trading strategies in a flexible and visual environment. It serves both as a practical tool for backtesting and as a growing foundation for more advanced algorithmic research in commodities.
+
+---
+
+## 📬 Contact
+
+Developed by **Diego Rossi**  
+For questions, suggestions, or collaboration opportunities, feel free to reach out.

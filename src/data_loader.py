@@ -1,24 +1,23 @@
-
 from constants import commodities_dict, tickers
 
 import pandas as pd
 import yfinance as yf
 
-def yahoo_quotes(start_date, end_date):
-    df_yf = yf.download(tickers, start=start_date, end=end_date, interval='1d')
-    df = df_yf['Close'].copy()
 
-    # Rename
-    df = df.rename(columns=commodities_dict)
+def yahoo_quotes(start_date=None, end_date=None):
+    if start_date is None:
+        start_date = "2000-01-01"
+    if end_date is None:
+        end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
-    # Order
-    ativos_ativos = [commodities_dict[ticker] for ticker in tickers]
-    df = df[ativos_ativos]
+    df = yf.download(tickers, start=start_date, end=end_date)["Close"]
 
-    # Index
-    df = df.reset_index()
-    df = df.set_index('Date')
-    df.index.name = 'date'
-    df.columns.name = None
+    df = df.dropna()
+
+    df = df.rename(columns=lambda col: commodities_dict.get(col, col))
+
+    # MANTÉM o índice como datetime:
+    df.index = pd.to_datetime(df.index)
+    df.index.name = "date"
 
     return df

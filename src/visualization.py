@@ -1,67 +1,106 @@
 
-import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.graph_objects as go
 
-def backtest_charts(df_prices, df_trades, commodity_chosen, down_entry, up_exit, start_date, end_date, mtm_trade, tons_conversion):
+try:
+    import streamlit as st
+except ImportError:
+    st = None
+
+def backtest_charts(df_prices, df_trades, commodity_chosen, down_entry, up_exit, start_date, end_date, mtm_trade, tons_conversion, use_streamlit=True):
     df_prices_plot = df_prices.copy()
+    df_prices_plot.index = pd.to_datetime(df_prices_plot.index)
+    df_prices_plot['Date'] = df_prices_plot.index
     df_prices_plot = df_prices_plot.loc[start_date:end_date]
 
-    # Chart 1: Trade signals
-    plt.figure(figsize=(14, 6))
-    plt.plot(df_prices_plot.index, df_prices_plot[commodity_chosen], label=f'{commodity_chosen.capitalize()} Price', color='black', linewidth=2)
+    fig_price = go.Figure()
+    fig_price.add_trace(go.Scatter(
+        x=df_prices_plot.index,
+        y=df_prices_plot[commodity_chosen],
+        mode='lines',
+        name=f'{commodity_chosen.capitalize()} Price',
+        line=dict(color='black')
+    ))
 
-    plt.scatter(
-        df_trades[df_trades['position'] == 'buy'].index,
-        df_trades[df_trades['position'] == 'buy']['trade_price'],
-        marker='^', color='limegreen', edgecolor='black', label='Buy Signal', s=200, linewidths=1.5, zorder=5
+    buys = df_trades[df_trades['position'] == 'buy']
+    sells = df_trades[df_trades['position'] == 'sell']
+
+    fig_price.add_trace(go.Scatter(
+        x=buys.index, y=buys['trade_price'],
+        mode='markers', name='Buy Signal',
+        marker=dict(symbol='triangle-up', size=12, color='green', line=dict(color='black', width=1))
+    ))
+    fig_price.add_trace(go.Scatter(
+        x=sells.index, y=sells['trade_price'],
+        mode='markers', name='Sell Signal',
+        marker=dict(symbol='triangle-down', size=12, color='red', line=dict(color='black', width=1))
+    ))
+
+    if mtm_trade and mtm_trade['date'] in df_prices_plot.index:
+        last_price = df_prices_plot[commodity_chosen].loc[mtm_trade['date']]
+        fig_price.add_trace(go.Scatter(
+            x=[mtm_trade['date']], y=[last_price],
+            mode='markers', name='Open MTM Position',
+            marker=dict(symbol='circle', size=14, color='orange', line=dict(color='black', width=2))
+        ))
+
+    fig_price.update_layout(
+        title="📌 Price and Trading Signals",
+        xaxis_title="Date", yaxis_title=f"Quote of {commodity_chosen}"
     )
-    plt.scatter(
-        df_trades[df_trades['position'] == 'sell'].index,
-        df_trades[df_trades['position'] == 'sell']['trade_price'],
-        marker='v', color='crimson', edgecolor='black', label='Sell Signal', s=200, linewidths=1.5, zorder=5
+
+    if use_streamlit and st is not None:
+        st.plotly_chart(fig_price, use_container_width=True)
+        st.markdown("---")
+    else:
+        fig_price.show()
+
+    if 'spread' not in df_prices_plot.columns:
+        raise ValueError("The DataFrame passed to backtest_charts must contain a 'spread' column.")
+
+    fig_spread = go.Figure()
+    fig_spread.add_trace(go.Scatter(
+        x=df_prices_plot.index,
+        y=df_prices_plot['spread'],
+        name="Spread",
+        line=dict(color='purple')
+    ))
+
+    fig_spread.add_hline(y=down_entry, line_dash='dash', line_color='green', annotation_text="Entry", annotation_position="bottom left")
+    fig_spread.add_hline(y=up_exit, line_dash='dash', line_color='red', annotation_text="Exit", annotation_position="top left")
+
+    fig_spread.update_layout(
+        title="📉 Spread Behavior",
+        xaxis_title="Date", yaxis_title="Spread (metric tons)"
     )
-    if mtm_trade and mtm_trade['date'] in df_prices.index:
-        last_price = df_prices[commodity_chosen].loc[mtm_trade['date']]
-        plt.scatter(
-            mtm_trade['date'],
-            last_price,
-            marker='o', color='orange', edgecolor='black', label='Open MTM Position', s=250, linewidths=2, zorder=6
-        )
-    plt.title(f'{commodity_chosen.capitalize()} Price with Buy/Sell/MTM Signals', fontsize=16)
-    plt.xlabel('Date', fontsize=14)
-    plt.ylabel('Price (original units)', fontsize=14)
-    plt.legend(fontsize=12, loc='best')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.show()
 
-    # Chart 2: Spread evolution
-    plt.figure(figsize=(14, 5))
-    df_spread = df_prices.loc[start_date:end_date]
-    plt.plot(df_spread.index, df_spread['spread'], label='Spread', color='purple', linewidth=2)
-    plt.axhline(down_entry, color='limegreen', linestyle='--', linewidth=2, label='Entry Threshold')
-    plt.axhline(up_exit, color='crimson', linestyle='--', linewidth=2, label='Exit Threshold')
-    plt.fill_between(df_spread.index, down_entry, up_exit, color='lightgrey', alpha=0.3, label='Neutral Zone')
-    plt.title('Spread Evolution', fontsize=16)
-    plt.xlabel('Date', fontsize=14)
-    plt.ylabel('Spread (unitless)', fontsize=14)
-    plt.legend(fontsize=12, loc='best')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.show()
+    if use_streamlit and st is not None:
+        st.plotly_chart(fig_spread, use_container_width=True)
+        st.markdown("---")
+    else:
+        fig_spread.show()
 
-    # Chart 3: Cumulative PnL
-    plt.figure(figsize=(14, 5))
-    plt.plot(df_trades.index, df_trades['pnl_usd_cumsum'], label='Cumulative Realized PnL (USD)', color='royalblue', linewidth=2)
+    fig_pnl = go.Figure()
+    fig_pnl.add_trace(go.Scatter(
+        x=df_trades.index, y=df_trades['pnl_usd_cumsum'],
+        mode='lines', name='Realized PnL', line=dict(color='royalblue')
+    ))
+
     if mtm_trade:
-        plt.scatter(
-            mtm_trade['date'],
-            df_trades['pnl_usd_cumsum'].iloc[-1] + mtm_trade['pnl_usd'],
-            color='orange', edgecolor='black', label='MTM Adjustment', s=250, linewidths=2, zorder=5
-        )
-    plt.title('Cumulative Profit and Loss (USD)', fontsize=16)
-    plt.xlabel('Date', fontsize=14)
-    plt.ylabel('PnL (USD)', fontsize=14)
-    plt.legend(fontsize=12, loc='best')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.show()
+        mtm_point = df_trades['pnl_usd_cumsum'].iloc[-1] + mtm_trade['pnl_usd']
+        fig_pnl.add_trace(go.Scatter(
+            x=[mtm_trade['date']], y=[mtm_point],
+            mode='markers', name='MTM Adjustment',
+            marker=dict(color='orange', size=14, line=dict(color='black', width=2))
+        ))
+
+    fig_pnl.update_layout(
+        title="💵 Cumulative PnL",
+        xaxis_title="Date", yaxis_title="PnL (USD)"
+    )
+
+    if use_streamlit and st is not None:
+        st.plotly_chart(fig_pnl, use_container_width=True)
+        st.markdown("---")
+    else:
+        fig_pnl.show()
