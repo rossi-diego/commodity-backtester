@@ -3,44 +3,44 @@ import pandas as pd
 
 
 def backtest(backtest_strategy, start_date, end_date, df, up_exit, down_entry,
-             commodity_chosen, commodity_spread, tons_conversion, contract_size, window=20):
+             commodity_chosen, commodity_ratio, tons_conversion, contract_size, window=20):
 
     df_filtered = df.loc[start_date:end_date].copy()
 
     trades = []
     position_open = False
 
-    if backtest_strategy == "spread":
+    if backtest_strategy == "ratio":
         factor_1 = tons_conversion[commodity_chosen]
-        factor_2 = tons_conversion[commodity_spread]
+        factor_2 = tons_conversion[commodity_ratio]
 
-        df_filtered['spread'] = (df_filtered[commodity_chosen] * factor_1) / (df_filtered[commodity_spread] * factor_2)
+        df_filtered['ratio'] = (df_filtered[commodity_chosen] * factor_1) / (df_filtered[commodity_ratio] * factor_2)
 
         for _, row in df_filtered.iterrows():
             trade_date = row.name
             entry_price = row[commodity_chosen]
 
-            if row['spread'] <= down_entry and not position_open:
+            if row['ratio'] <= down_entry and not position_open:
                 trades.append({
                     'trade_price': entry_price,
-                    'trade_spread': row['spread'],
+                    'trade_ratio': row['ratio'],
                     'position': 'buy',
                     'quantity': 1
                 })
                 position_open = True
 
-            elif row['spread'] > up_exit and position_open:
+            elif row['ratio'] > up_exit and position_open:
                 trades.append({
                     'trade_price': entry_price,
-                    'trade_spread': row['spread'],
+                    'trade_ratio': row['ratio'],
                     'position': 'sell',
                     'quantity': -1
                 })
                 position_open = False
 
-        df['spread'] = (df[commodity_chosen] * factor_1) / (df[commodity_spread] * factor_2)
+        df['ratio'] = (df[commodity_chosen] * factor_1) / (df[commodity_ratio] * factor_2)
 
-        df_trades = pd.DataFrame(trades, index=df_filtered[df_filtered['spread'].isin([t['trade_spread'] for t in trades])].index[:len(trades)])
+        df_trades = pd.DataFrame(trades, index=df_filtered[df_filtered['ratio'].isin([t['trade_ratio'] for t in trades])].index[:len(trades)])
         df_trades.index.name = "date"
 
     elif backtest_strategy == "mean_reversion":
@@ -57,7 +57,7 @@ def backtest(backtest_strategy, start_date, end_date, df, up_exit, down_entry,
             if entry_price <= lower_band and not position_open:
                 trades.append({
                     'trade_price': entry_price,
-                    'trade_spread': np.nan,
+                    'trade_ratio': np.nan,
                     'position': 'buy',
                     'quantity': 1
                 })
@@ -66,7 +66,7 @@ def backtest(backtest_strategy, start_date, end_date, df, up_exit, down_entry,
             elif entry_price >= upper_band and position_open:
                 trades.append({
                     'trade_price': entry_price,
-                    'trade_spread': np.nan,
+                    'trade_ratio': np.nan,
                     'position': 'sell',
                     'quantity': -1
                 })

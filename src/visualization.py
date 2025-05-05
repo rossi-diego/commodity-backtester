@@ -55,30 +55,30 @@ def backtest_charts(df_prices, df_trades, commodity_chosen, down_entry, up_exit,
     else:
         fig_price.show()
 
-    if 'spread' not in df_prices_plot.columns:
-        raise ValueError("The DataFrame passed to backtest_charts must contain a 'spread' column.")
+    if 'ratio' not in df_prices_plot.columns:
+        raise ValueError("The DataFrame passed to backtest_charts must contain a 'ratio' column.")
 
-    fig_spread = go.Figure()
-    fig_spread.add_trace(go.Scatter(
+    fig_ratio = go.Figure()
+    fig_ratio.add_trace(go.Scatter(
         x=df_prices_plot.index,
-        y=df_prices_plot['spread'],
-        name="Spread",
+        y=df_prices_plot['ratio'],
+        name="ratio",
         line=dict(color='purple')
     ))
 
-    fig_spread.add_hline(y=down_entry, line_dash='dash', line_color='green', annotation_text="Entry", annotation_position="bottom left")
-    fig_spread.add_hline(y=up_exit, line_dash='dash', line_color='red', annotation_text="Exit", annotation_position="top left")
+    fig_ratio.add_hline(y=down_entry, line_dash='dash', line_color='green', annotation_text="Entry", annotation_position="bottom left")
+    fig_ratio.add_hline(y=up_exit, line_dash='dash', line_color='red', annotation_text="Exit", annotation_position="top left")
 
-    fig_spread.update_layout(
-        title="📉 Spread Behavior",
-        xaxis_title="Date", yaxis_title="Spread (metric tons)"
+    fig_ratio.update_layout(
+        title="📉 Ratio Behavior",
+        xaxis_title="Date", yaxis_title="ratio (metric tons)"
     )
 
     if use_streamlit and st is not None:
-        st.plotly_chart(fig_spread, use_container_width=True)
+        st.plotly_chart(fig_ratio, use_container_width=True)
         st.markdown("---")
     else:
-        fig_spread.show()
+        fig_ratio.show()
 
     fig_pnl = go.Figure()
     fig_pnl.add_trace(go.Scatter(
