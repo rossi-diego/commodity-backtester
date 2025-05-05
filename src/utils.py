@@ -120,19 +120,19 @@ def backtest_performance(df_trades, df_prices, mtm_trade=None,
 
 
 def strategy_describe(df, tons_conversion, backtest_strategy=None):
-    if backtest_strategy != 'spread':
+    if backtest_strategy != 'ratio':
         return pd.DataFrame(index=df.index)
 
     summary_list = []
 
     for col1, col2 in permutations(df.columns, 2):
         if col1 in tons_conversion and col2 in tons_conversion:
-            spread_name = f"{col1}/{col2}"
-            spread_series = (df[col1] * tons_conversion[col1]) / (df[col2] * tons_conversion[col2])
+            ratio_name = f"{col1}/{col2}"
+            ratio_series = (df[col1] * tons_conversion[col1]) / (df[col2] * tons_conversion[col2])
 
-            stats = spread_series.describe()
+            stats = ratio_series.describe()
             stats["coefficient variation"] = stats["std"] / stats["mean"]
-            stats.name = spread_name 
+            stats.name = ratio_name 
             summary_list.append(stats)
 
     if not summary_list:

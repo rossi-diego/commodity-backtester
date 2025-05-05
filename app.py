@@ -23,7 +23,7 @@ st.markdown("""
 This tool was developed to simulate and evaluate trading strategies involving commodities.
 It allows users to test historical performance using customizable parameters and visualize key metrics and charts.
             
-For now, the only strategy available is the spread (metric tons) trading.
+For now, the only strategy available is the ratio (metric tons) trading.
 
 Developed by Diego Rossi. For questions, feel free to reach out.
 """)
@@ -31,14 +31,14 @@ Developed by Diego Rossi. For questions, feel free to reach out.
 # ------------------------------
 # Step 0: Select Strategy
 # ------------------------------
-strategy = st.selectbox("Select the strategy you want to use", ["", "Spreads", "Mean Reversion"])
+strategy = st.selectbox("Select the strategy you want to use", ["", "Ratio", "Mean Reversion"])
 
 # Only proceed if a strategy is selected
 if strategy == "":
     st.info("Please select a strategy to continue.")
 elif strategy == "Mean Reversion":
     st.warning("⚠️ The Mean Reversion strategy is currently under development. Please select another strategy.")
-elif strategy == "Spreads":
+elif strategy == "Ratio":
     # Initialize session state
     if "confirmed_commodities" not in st.session_state:
         st.session_state.confirmed_commodities = False
@@ -52,7 +52,7 @@ elif strategy == "Spreads":
     commodities = list(commodities_dict.values())
     commodity_chosen = st.selectbox("Select the commodity you want to trade", commodities)
     second_commodity = [c for c in commodities if c != commodity_chosen]
-    commodity_second = st.selectbox("Select the spread commodity", second_commodity)
+    commodity_second = st.selectbox("Select the ratio commodity", second_commodity)
 
     if st.button("✅ Confirm commodities"):
         st.session_state.confirmed_commodities = True
@@ -79,10 +79,10 @@ elif strategy == "Spreads":
             st.session_state.end_date = end_date
 
     # ------------------------------
-    # Step 3: Show Spread Overview
+    # Step 3: Show ratio Overview
     # ------------------------------
     if st.session_state.confirmed_dates:
-        st.markdown("### 3. Spread Overview")
+        st.markdown("### 3. Ratio Overview")
 
         start_date = st.session_state.start_date
         end_date = st.session_state.end_date
@@ -91,19 +91,19 @@ elif strategy == "Spreads":
         df_filtered = df.loc[str(start_date):str(end_date), [commodity_chosen, commodity_second]].copy()
         factor_1 = tons_conversion[commodity_chosen]
         factor_2 = tons_conversion[commodity_second]
-        df_filtered["spread"] = (df_filtered[commodity_chosen] * factor_1) / (df_filtered[commodity_second] * factor_2)
+        df_filtered["ratio"] = (df_filtered[commodity_chosen] * factor_1) / (df_filtered[commodity_second] * factor_2)
 
-        spread_stats = df_filtered.describe().T
-        spread_stats["coefficient variation"] = spread_stats["std"] / spread_stats["mean"]
-        spread_stats = spread_stats.round(4)
+        ratio_stats = df_filtered.describe().T
+        ratio_stats["coefficient variation"] = ratio_stats["std"] / ratio_stats["mean"]
+        ratio_stats = ratio_stats.round(4)
 
-        styled_spread = spread_stats.style \
+        styled_ratio = ratio_stats.style \
             .format(na_rep='—', precision=4) \
             .set_properties(**{'text-align': 'center'}) \
             .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
 
-        st.subheader("📊 Spread Data Overview")
-        st.write(styled_spread)
+        st.subheader("📊 Ratio Data Overview")
+        st.write(styled_ratio)
 
         # ------------------------------
         # Step 4: Define Strategy Parameters
@@ -113,9 +113,9 @@ elif strategy == "Spreads":
         col1, col2 = st.columns(2)
 
         with col1:
-            down_entry_str = st.text_input("Spread entry level", "0.95")
+            down_entry_str = st.text_input("Ratio entry level", "0.95")
         with col2:
-            up_exit_str = st.text_input("Spread exit level", "1.05")
+            up_exit_str = st.text_input("Ratio exit level", "1.05")
 
         # Safe conversion with fallback
         try:
@@ -132,14 +132,14 @@ elif strategy == "Spreads":
             st.markdown("Running strategy...")
 
             df_trades, position_open = backtest(
-                backtest_strategy="spread",
+                backtest_strategy="ratio",
                 start_date=start_date,
                 end_date=end_date,
                 df=df,
                 up_exit=up_exit,
                 down_entry=down_entry,
                 commodity_chosen=commodity_chosen,
-                commodity_spread=commodity_second,
+                commodity_ratio=commodity_second,
                 tons_conversion=tons_conversion,
                 contract_size=contract_sizes[commodity_chosen],
             )

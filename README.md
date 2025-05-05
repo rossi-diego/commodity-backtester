@@ -5,18 +5,18 @@
 
 This project provides an interactive environment for backtesting trading strategies focused on commodities. Users can test historical performance using customizable parameters, review detailed metrics, and visualize trade signals on charts.
 
-> 💡 While the initial implementation supports spread-based strategies, the architecture is designed to accommodate various other trading models in the future.
+> 💡 While the initial implementation supports ratio-based strategies, the architecture is designed to accommodate various other trading models in the future.
 
 ---
 
 ## 🔍 Features
 
 - Interactive backtest tool for commodity trading strategies  
-- Modular and extensible design to support multiple strategies (e.g. Spread, Mean Reversion, Momentum)  
+- Modular and extensible design to support multiple strategies (e.g. ratio, Mean Reversion, Momentum)  
 - Clean, responsive interface built with **Streamlit**  
 - Historical trade metrics: Realized PnL, Drawdown, Sharpe Ratio, Win Rate  
 - Interactive trade signal charts with buy/sell markers  
-- Descriptive statistics of selected commodity prices and spreads
+- Descriptive statistics of selected commodity prices and ratios
 
 ---
 
