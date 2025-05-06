@@ -46,6 +46,21 @@ elif strategy == "Ratio":
         st.session_state.confirmed_dates = False
 
     # ------------------------------
+    # Step 0: Initialize session state variables
+    # ------------------------------
+    for var in [
+        "confirmed_commodities",
+        "confirmed_dates",
+        "df",
+        "min_date",
+        "max_date",
+        "start_date",
+        "end_date",
+    ]:
+        if var not in st.session_state:
+            st.session_state[var] = None
+
+    # ------------------------------
     # Step 1: Select Commodities
     # ------------------------------
     st.markdown("### 1. Select Commodities")
@@ -55,9 +70,16 @@ elif strategy == "Ratio":
     commodity_second = st.selectbox("Select the ratio commodity", second_commodity)
 
     if st.button("✅ Confirm commodities"):
+        df, first_available_date = yahoo_quotes("2000-01-01", datetime.date.today())
+
+        if df.empty or first_available_date is None:
+            st.error("No valid data found for selected tickers.")
+            st.stop()
+
         st.session_state.confirmed_commodities = True
-        st.session_state.df = yahoo_quotes("2000-01-01", datetime.date.today())
-        st.session_state.df.index = pd.to_datetime(st.session_state.df.index)
+        st.session_state.df = df
+        st.session_state.min_date = first_available_date
+        st.session_state.max_date = df.index.max().date()
 
     # ------------------------------
     # Step 2: Select Date Range
@@ -65,8 +87,12 @@ elif strategy == "Ratio":
     if st.session_state.confirmed_commodities:
         st.markdown("### 2. Select Date Range")
         df = st.session_state.df
-        min_date = df.index.min().date()
-        max_date = df.index.max().date()
+        min_date = st.session_state.get("min_date")
+        max_date = st.session_state.get("max_date")
+
+        if min_date is None or max_date is None:
+            st.error("Date range not found. Please confirm commodities first.")
+            st.stop()
 
         st.markdown(f"**Available date range:** {min_date} → {max_date}")
 
