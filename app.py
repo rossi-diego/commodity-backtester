@@ -14,6 +14,18 @@ from src.visualization import backtest_charts
 
 st.set_page_config(page_title="Commodity Backtester", layout="wide")
 
+st.markdown(
+    """
+    <style>
+    html, body, [data-testid="stAppViewContainer"] {
+        background-color: white !important;
+        color: black !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # ------------------------------
 # App Title & Introduction
 # ------------------------------
@@ -24,6 +36,8 @@ This tool was developed to simulate and evaluate trading strategies involving co
 It allows users to test historical performance using customizable parameters and visualize key metrics and charts.
             
 For now, the only strategy available is the ratio (metric tons) trading.
+            
+For the best experience, i recommend using the light theme. You can switch themes via the settings menu (⚙️) in the top right corner.
 
 Developed by Diego Rossi. For questions, feel free to reach out.
 """)
