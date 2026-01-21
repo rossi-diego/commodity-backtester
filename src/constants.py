@@ -42,24 +42,24 @@ class CommoditySpec:
 
 COMMODITIES: Dict[str, CommoditySpec] = {
     # CBOT Grains
-    "ZSN25.CBT": CommoditySpec(
-        ticker="ZSN25.CBT",
+    "ZS=F": CommoditySpec(
+        ticker="ZS=F",
         name="Soybean",
         exchange="CBOT",
         contract_size=136.0,
         tons_conversion=36.74 / 100,
         unit="cents/bushel"
     ),
-    "ZCN25.CBT": CommoditySpec(
-        ticker="ZCN25.CBT",
+    "ZC=F": CommoditySpec(
+        ticker="ZC=F",
         name="Corn",
         exchange="CBOT",
         contract_size=127.0,
         tons_conversion=39.37 / 100,
         unit="cents/bushel"
     ),
-    "KEN25.CBT": CommoditySpec(
-        ticker="KEN25.CBT",
+    "ZW=F": CommoditySpec(
+        ticker="ZW=F",
         name="Wheat",
         exchange="CBOT",
         contract_size=136.0,
@@ -68,16 +68,16 @@ COMMODITIES: Dict[str, CommoditySpec] = {
     ),
 
     # CBOT Soy Complex
-    "ZMN25.CBT": CommoditySpec(
-        ticker="ZMN25.CBT",
+    "ZS=F": CommoditySpec(
+        ticker="ZS=F",
         name="Soybean Meal",
         exchange="CBOT",
         contract_size=0.9072,
         tons_conversion=1.1023,
         unit="$/short ton"
     ),
-    "ZLN25.CBT": CommoditySpec(
-        ticker="ZLN25.CBT",
+    "ZL=F": CommoditySpec(
+        ticker="ZL=F",
         name="Soybean Oil",
         exchange="CBOT",
         contract_size=27.22,
@@ -86,16 +86,16 @@ COMMODITIES: Dict[str, CommoditySpec] = {
     ),
 
     # NYMEX Energy
-    "HON25.NYM": CommoditySpec(
-        ticker="HON25.NYM",
+    "HO=F": CommoditySpec(
+        ticker="HO=F",
         name="Heating Oil",
         exchange="NYMEX",
         contract_size=133.0,
         tons_conversion=312.5,
         unit="$/gallon"
     ),
-    "CLN25.NYM": CommoditySpec(
-        ticker="CLN25.NYM",
+    "CL=F": CommoditySpec(
+        ticker="CL=F",
         name="Crude Oil",
         exchange="NYMEX",
         contract_size=136.4,
