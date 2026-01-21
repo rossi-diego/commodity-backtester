@@ -1,12 +1,23 @@
-pandas>=1.5
-numpy>=1.23
-matplotlib>=3.6
-yfinance>=0.2.18
-streamlit>=1.25
-openpyxl>=3.1
-jupyterlab>=3.5
-ipykernel>=6.15
-plotly>=5.0.0
-scikit-learn>=1.2
-seaborn>=0.12
-requests>=2.31
+# =============================================================================
+# Commodity Backtester - Dependencies
+# =============================================================================
+
+# Core Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Data Source
+yfinance>=0.2.30
+
+# Web Application
+streamlit>=1.28.0
+
+# Visualization
+plotly>=5.18.0
+
+# Excel Support (for data export)
+openpyxl>=3.1.0
+
+# Development Tools (optional)
+# jupyterlab>=4.0.0
+# ipykernel>=6.25.0
