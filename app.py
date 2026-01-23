@@ -473,7 +473,6 @@ if st.session_state.confirmed_dates:
         strategy_params = {
             "up_exit": up_exit,
             "down_entry": down_entry,
-            "commodity_ratio": commodity_ratio,
         }
 
     elif strategy == "mean_reversion":
