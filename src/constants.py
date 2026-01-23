@@ -68,8 +68,8 @@ COMMODITIES: Dict[str, CommoditySpec] = {
     ),
 
     # CBOT Soy Complex
-    "ZS=F": CommoditySpec(
-        ticker="ZS=F",
+    "ZM=F": CommoditySpec(
+        ticker="ZM=F",
         name="Soybean Meal",
         exchange="CBOT",
         contract_size=0.9072,
@@ -101,6 +101,38 @@ COMMODITIES: Dict[str, CommoditySpec] = {
         contract_size=136.4,
         tons_conversion=7.4,
         unit="$/barrel"
+    ),
+    "NG=F": CommoditySpec(
+        ticker="NG=F",
+        name="Natural Gas",
+        exchange="NYMEX",
+        contract_size=10000.0,
+        tons_conversion=1.0,
+        unit="$/MMBtu"
+    ),
+    "GC=F": CommoditySpec(
+        ticker="GC=F",
+        name="Gold",
+        exchange="COMEX",
+        contract_size=100.0,
+        tons_conversion=32.1507,
+        unit="$/troy oz"
+    ),
+    "SI=F": CommoditySpec(
+        ticker="SI=F",
+        name="Silver",
+        exchange="COMEX",
+        contract_size=5000.0,
+        tons_conversion=32.1507,
+        unit="$/troy oz"
+    ),
+    "HG=F": CommoditySpec(
+        ticker="HG=F",
+        name="Copper",
+        exchange="COMEX",
+        contract_size=25000.0,
+        tons_conversion=2204.62,
+        unit="$/lb"
     ),
 }
 

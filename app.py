@@ -2,30 +2,34 @@
 Commodity Backtester - Streamlit Application
 
 An interactive web application for backtesting commodity trading strategies.
-Supports ratio-based trading and provides comprehensive performance metrics.
+Supports multiple strategies including ratio trading, mean reversion, momentum, and breakout.
 
 Usage:
     streamlit run app.py
 
 Author: Diego Rossi
+Version: 2.0.0
 """
 
 import datetime
+import io
 import logging
 import sys
 from pathlib import Path
+from typing import Dict, Any, Optional, Tuple
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 # Ensure src is in path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.constants import commodities_dict, contract_sizes, tons_conversion
+from src.constants import commodities_dict, contract_sizes, tons_conversion, COMMODITIES
 from src.data_loader import yahoo_quotes, DataLoaderError
-from src.strategy import backtest, BacktestError
-from src.utils import pnl_trades, backtest_performance
-from src.visualization import backtest_charts
+from src.strategy import backtest, BacktestError, StrategyType, get_available_strategies
+from src.utils import pnl_trades, backtest_performance, backtest_performance_extended
+from src.visualization import backtest_charts, create_strategy_comparison_chart
 
 # =============================================================================
 # Logging Configuration
@@ -42,23 +46,78 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 st.set_page_config(
-    page_title="Commodity Backtester",
+    page_title="Commodity Backtester Pro",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# Custom CSS for cleaner appearance
+# Custom CSS for professional appearance
 st.markdown("""
     <style>
     .stApp {
-        background-color: #ffffff;
+        background-color: #f8f9fa;
+    }
+    .main-header {
+        background: linear-gradient(90deg, #1e3a5f 0%, #2d5a87 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-bottom: 1rem;
     }
     .metric-card {
-        background-color: #f8f9fa;
-        border-radius: 8px;
-        padding: 16px;
-        margin: 8px 0;
+        background-color: white;
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 10px 0;
+    }
+    .strategy-card {
+        background-color: white;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        transition: border-color 0.3s;
+    }
+    .strategy-card:hover {
+        border-color: #1e3a5f;
+    }
+    .positive-value {
+        color: #28a745;
+        font-weight: bold;
+    }
+    .negative-value {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    .info-box {
+        background-color: #e7f3ff;
+        border-left: 4px solid #2196f3;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 0 8px 8px 0;
+    }
+    .warning-box {
+        background-color: #fff3e0;
+        border-left: 4px solid #ff9800;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 0 8px 8px 0;
+    }
+    div[data-testid="stMetric"] {
+        background-color: white;
+        border-radius: 10px;
+        padding: 15px 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: white;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 20px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -67,43 +126,146 @@ st.markdown("""
 # Application Header
 # =============================================================================
 
-st.title("📈 Commodity Backtester")
-
 st.markdown("""
-This application allows you to backtest commodity trading strategies using historical data.
-
-**Features:**
-- Ratio-based trading strategy (comparing two commodities in metric ton terms)
-- Real-time data from Yahoo Finance
-- Interactive charts with buy/sell signals
-- Comprehensive performance metrics (P&L, Sharpe Ratio, Max Drawdown, VaR)
-
----
-""")
+<div class="main-header">
+    <h1 style="margin:0;">📈 Commodity Backtester Pro</h1>
+    <p style="margin:5px 0 0 0; opacity:0.9;">Professional-grade backtesting for commodity trading strategies</p>
+</div>
+""", unsafe_allow_html=True)
 
 # =============================================================================
-# Strategy Selection
+# Sidebar Configuration
 # =============================================================================
 
-AVAILABLE_STRATEGIES = {
-    "": "Select a strategy...",
-    "ratio": "Ratio Strategy",
-    "mean_reversion": "Mean Reversion (Coming Soon)"
+with st.sidebar:
+    st.markdown("### ⚙️ Settings")
+
+    # Transaction costs settings
+    st.markdown("#### Transaction Costs")
+    enable_costs = st.checkbox("Enable Transaction Costs", value=False)
+
+    if enable_costs:
+        commission_per_trade = st.number_input(
+            "Commission per Trade ($)",
+            min_value=0.0,
+            max_value=100.0,
+            value=2.50,
+            step=0.50,
+            help="Fixed commission charged per trade"
+        )
+        slippage_pct = st.slider(
+            "Slippage (%)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.05,
+            step=0.01,
+            help="Expected slippage as percentage of trade price"
+        )
+    else:
+        commission_per_trade = 0.0
+        slippage_pct = 0.0
+
+    st.markdown("---")
+
+    # Risk management settings
+    st.markdown("#### Risk Management")
+    enable_stop_loss = st.checkbox("Enable Stop Loss", value=False)
+
+    if enable_stop_loss:
+        stop_loss_pct = st.slider(
+            "Stop Loss (%)",
+            min_value=1.0,
+            max_value=20.0,
+            value=5.0,
+            step=0.5,
+            help="Close position if loss exceeds this percentage"
+        )
+    else:
+        stop_loss_pct = None
+
+    enable_take_profit = st.checkbox("Enable Take Profit", value=False)
+
+    if enable_take_profit:
+        take_profit_pct = st.slider(
+            "Take Profit (%)",
+            min_value=1.0,
+            max_value=50.0,
+            value=10.0,
+            step=0.5,
+            help="Close position if profit exceeds this percentage"
+        )
+    else:
+        take_profit_pct = None
+
+    st.markdown("---")
+
+    # Display settings
+    st.markdown("#### Display")
+    show_advanced_metrics = st.checkbox("Show Advanced Metrics", value=True)
+    show_trade_log = st.checkbox("Show Trade Log", value=True)
+
+# =============================================================================
+# Strategy Selection with Tabs
+# =============================================================================
+
+st.markdown("### 📊 Select Trading Strategy")
+
+# Strategy descriptions
+STRATEGY_INFO = {
+    "ratio": {
+        "name": "Ratio Strategy",
+        "icon": "📐",
+        "description": "Trade based on price ratios between two commodities in metric ton terms. Ideal for spread trading.",
+        "best_for": "Spread trading, mean-reverting pairs"
+    },
+    "mean_reversion": {
+        "name": "Mean Reversion",
+        "icon": "🔄",
+        "description": "Uses Bollinger Bands to identify overbought/oversold conditions. Buys at lower band, sells at upper band.",
+        "best_for": "Range-bound markets, sideways trends"
+    },
+    "momentum": {
+        "name": "Momentum / Trend Following",
+        "icon": "📈",
+        "description": "Combines Moving Average crossover with RSI filter to follow established trends.",
+        "best_for": "Trending markets, directional moves"
+    },
+    "breakout": {
+        "name": "Breakout Strategy",
+        "icon": "💥",
+        "description": "Enters on resistance breakout with trailing stop. Captures large directional moves.",
+        "best_for": "Volatile markets, breakout patterns"
+    },
+    "macd": {
+        "name": "MACD Crossover",
+        "icon": "📊",
+        "description": "Uses MACD line crossovers with signal line. Classic momentum indicator with built-in trend detection.",
+        "best_for": "Trending markets, momentum trading"
+    }
 }
 
-strategy = st.selectbox(
-    "Select Trading Strategy",
-    options=list(AVAILABLE_STRATEGIES.keys()),
-    format_func=lambda x: AVAILABLE_STRATEGIES[x]
-)
+# Create strategy selection tabs
+strategy_tabs = st.tabs([f"{info['icon']} {info['name']}" for info in STRATEGY_INFO.values()])
+
+selected_strategy = None
+for idx, (strategy_key, info) in enumerate(STRATEGY_INFO.items()):
+    with strategy_tabs[idx]:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown(f"**{info['description']}**")
+            st.markdown(f"*Best for: {info['best_for']}*")
+        with col2:
+            if st.button(f"Select {info['name']}", key=f"btn_{strategy_key}", type="primary"):
+                st.session_state.selected_strategy = strategy_key
+
+# Get selected strategy from session state
+strategy = st.session_state.get("selected_strategy", None)
 
 if not strategy:
-    st.info("👆 Please select a strategy to begin.")
+    st.info("👆 Click on a strategy tab and press 'Select' to begin backtesting.")
     st.stop()
 
-if strategy == "mean_reversion":
-    st.warning("⚠️ Mean Reversion strategy is currently under development.")
-    st.stop()
+st.success(f"✅ Selected Strategy: **{STRATEGY_INFO[strategy]['name']}**")
 
 # =============================================================================
 # Session State Initialization
@@ -117,6 +279,7 @@ SESSION_VARS = [
     "max_date",
     "start_date",
     "end_date",
+    "backtest_results",
 ]
 
 for var in SESSION_VARS:
@@ -127,9 +290,18 @@ for var in SESSION_VARS:
 # Step 1: Commodity Selection
 # =============================================================================
 
-st.markdown("### 1. Select Commodities")
+st.markdown("---")
+st.markdown("### 1️⃣ Select Commodities")
 
 commodities = list(commodities_dict.values())
+
+# Group commodities by exchange
+commodity_groups = {}
+for ticker, spec in COMMODITIES.items():
+    exchange = spec.exchange
+    if exchange not in commodity_groups:
+        commodity_groups[exchange] = []
+    commodity_groups[exchange].append(spec.name)
 
 col1, col2 = st.columns(2)
 
@@ -137,19 +309,34 @@ with col1:
     commodity_chosen = st.selectbox(
         "Primary Commodity (to trade)",
         commodities,
-        help="The commodity you want to buy/sell based on the ratio signal"
+        help="The commodity you want to buy/sell based on the strategy signals"
     )
+
+    # Show commodity info
+    selected_spec = None
+    for spec in COMMODITIES.values():
+        if spec.name == commodity_chosen:
+            selected_spec = spec
+            break
+
+    if selected_spec:
+        st.caption(f"📍 Exchange: {selected_spec.exchange} | Unit: {selected_spec.unit}")
 
 with col2:
-    available_ratios = [c for c in commodities if c != commodity_chosen]
-    commodity_ratio = st.selectbox(
-        "Ratio Commodity (reference)",
-        available_ratios,
-        help="The commodity used to calculate the price ratio"
-    )
+    # For ratio strategy, need a second commodity
+    if strategy == "ratio":
+        available_ratios = [c for c in commodities if c != commodity_chosen]
+        commodity_ratio = st.selectbox(
+            "Ratio Commodity (reference)",
+            available_ratios,
+            help="The commodity used to calculate the price ratio"
+        )
+    else:
+        commodity_ratio = None
+        st.info("ℹ️ Single commodity strategy - no ratio commodity needed")
 
-if st.button("✅ Confirm Commodities", type="primary"):
-    with st.spinner("Loading market data from Yahoo Finance..."):
+if st.button("✅ Load Market Data", type="primary"):
+    with st.spinner("📡 Fetching data from Yahoo Finance..."):
         try:
             df, first_date = yahoo_quotes("2020-01-01", datetime.date.today())
 
@@ -162,7 +349,7 @@ if st.button("✅ Confirm Commodities", type="primary"):
             st.session_state.min_date = first_date
             st.session_state.max_date = df.index.max().date()
 
-            st.success(f"✅ Data loaded: {len(df):,} observations from {first_date}")
+            st.success(f"✅ Data loaded: **{len(df):,}** observations from **{first_date}** to **{st.session_state.max_date}**")
 
         except DataLoaderError as e:
             st.error(f"❌ Failed to load data: {e}")
@@ -174,15 +361,14 @@ if st.button("✅ Confirm Commodities", type="primary"):
 # =============================================================================
 
 if st.session_state.confirmed_commodities:
-    st.markdown("### 2. Select Date Range")
+    st.markdown("---")
+    st.markdown("### 2️⃣ Select Date Range")
 
     df = st.session_state.df
     min_date = st.session_state.min_date
     max_date = st.session_state.max_date
 
-    st.info(f"📅 Available data: **{min_date}** to **{max_date}**")
-
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns([2, 2, 1])
 
     with col1:
         start_date = st.date_input(
@@ -200,99 +386,287 @@ if st.session_state.confirmed_commodities:
             max_value=max_date
         )
 
+    with col3:
+        st.metric("Trading Days", f"{(pd.to_datetime(end_date) - pd.to_datetime(start_date)).days:,}")
+
     if start_date >= end_date:
         st.error("❌ Start date must be before end date.")
         st.stop()
 
-    if st.button("📅 Confirm Date Range", type="primary"):
-        st.session_state.confirmed_dates = True
-        st.session_state.start_date = start_date
-        st.session_state.end_date = end_date
+    # Quick date range buttons
+    st.markdown("**Quick Select:**")
+    quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
+
+    with quick_col1:
+        if st.button("Last Year"):
+            start_date = max_date - datetime.timedelta(days=365)
+    with quick_col2:
+        if st.button("Last 2 Years"):
+            start_date = max_date - datetime.timedelta(days=730)
+    with quick_col3:
+        if st.button("Last 3 Years"):
+            start_date = max_date - datetime.timedelta(days=1095)
+    with quick_col4:
+        if st.button("All Data"):
+            start_date = min_date
+
+    st.session_state.confirmed_dates = True
+    st.session_state.start_date = start_date
+    st.session_state.end_date = end_date
 
 # =============================================================================
-# Step 3: Strategy Parameters & Execution
+# Step 3: Strategy Parameters
 # =============================================================================
 
 if st.session_state.confirmed_dates:
-    st.markdown("### 3. Strategy Parameters")
+    st.markdown("---")
+    st.markdown("### 3️⃣ Strategy Parameters")
 
-    # Calculate ratio statistics for guidance
     df = st.session_state.df
     start_date = st.session_state.start_date
     end_date = st.session_state.end_date
 
-    df_filtered = df.loc[str(start_date):str(end_date), [commodity_chosen, commodity_ratio]].copy()
+    # Strategy-specific parameter inputs
+    if strategy == "ratio":
+        # Calculate ratio statistics for guidance
+        df_filtered = df.loc[str(start_date):str(end_date), [commodity_chosen, commodity_ratio]].copy()
 
-    factor_1 = tons_conversion[commodity_chosen]
-    factor_2 = tons_conversion[commodity_ratio]
-    df_filtered["ratio"] = (df_filtered[commodity_chosen] * factor_1) / (df_filtered[commodity_ratio] * factor_2)
+        factor_1 = tons_conversion[commodity_chosen]
+        factor_2 = tons_conversion[commodity_ratio]
+        df_filtered["ratio"] = (df_filtered[commodity_chosen] * factor_1) / (df_filtered[commodity_ratio] * factor_2)
 
-    # Display ratio statistics
-    ratio_stats = df_filtered["ratio"].describe()
+        ratio_stats = df_filtered["ratio"].describe()
 
-    st.markdown("#### Ratio Statistics (for reference)")
+        st.markdown("#### 📊 Ratio Statistics")
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Mean", f"{ratio_stats['mean']:.4f}")
-    col2.metric("Std Dev", f"{ratio_stats['std']:.4f}")
-    col3.metric("Min", f"{ratio_stats['min']:.4f}")
-    col4.metric("Max", f"{ratio_stats['max']:.4f}")
+        stat_cols = st.columns(5)
+        stat_cols[0].metric("Mean", f"{ratio_stats['mean']:.4f}")
+        stat_cols[1].metric("Std Dev", f"{ratio_stats['std']:.4f}")
+        stat_cols[2].metric("Min", f"{ratio_stats['min']:.4f}")
+        stat_cols[3].metric("Max", f"{ratio_stats['max']:.4f}")
+        stat_cols[4].metric("Current", f"{df_filtered['ratio'].iloc[-1]:.4f}")
 
-    st.markdown("#### Entry/Exit Thresholds")
+        st.markdown("#### 🎯 Entry/Exit Thresholds")
 
-    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-    with col1:
-        down_entry = st.number_input(
-            "Entry Level (Buy when ratio ≤)",
-            value=round(ratio_stats['mean'] - ratio_stats['std'], 4),
-            format="%.4f",
-            help="Buy signal triggers when ratio drops below this level"
-        )
+        with col1:
+            down_entry = st.number_input(
+                "Entry Level (Buy when ratio ≤)",
+                value=round(ratio_stats['mean'] - ratio_stats['std'], 4),
+                format="%.4f",
+                help="Buy signal triggers when ratio drops below this level"
+            )
 
-    with col2:
-        up_exit = st.number_input(
-            "Exit Level (Sell when ratio >)",
-            value=round(ratio_stats['mean'] + ratio_stats['std'], 4),
-            format="%.4f",
-            help="Sell signal triggers when ratio exceeds this level"
-        )
+        with col2:
+            up_exit = st.number_input(
+                "Exit Level (Sell when ratio >)",
+                value=round(ratio_stats['mean'] + ratio_stats['std'], 4),
+                format="%.4f",
+                help="Sell signal triggers when ratio exceeds this level"
+            )
 
-    if down_entry >= up_exit:
-        st.error("❌ Entry level must be lower than exit level.")
-        st.stop()
+        if down_entry >= up_exit:
+            st.error("❌ Entry level must be lower than exit level.")
+            st.stop()
+
+        strategy_params = {
+            "up_exit": up_exit,
+            "down_entry": down_entry,
+            "commodity_ratio": commodity_ratio,
+        }
+
+    elif strategy == "mean_reversion":
+        st.markdown("#### 📈 Bollinger Bands Parameters")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            bb_window = st.slider(
+                "Window Period",
+                min_value=5,
+                max_value=50,
+                value=20,
+                help="Number of periods for moving average calculation"
+            )
+
+        with col2:
+            bb_std = st.slider(
+                "Standard Deviations",
+                min_value=1.0,
+                max_value=3.0,
+                value=2.0,
+                step=0.1,
+                help="Number of standard deviations for bands"
+            )
+
+        strategy_params = {
+            "bb_window": bb_window,
+            "bb_std": bb_std,
+        }
+
+    elif strategy == "momentum":
+        st.markdown("#### 📈 Moving Average & RSI Parameters")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            fast_ma = st.slider(
+                "Fast MA Period",
+                min_value=5,
+                max_value=30,
+                value=10,
+                help="Fast moving average period"
+            )
+            slow_ma = st.slider(
+                "Slow MA Period",
+                min_value=20,
+                max_value=100,
+                value=30,
+                help="Slow moving average period"
+            )
+
+        with col2:
+            rsi_period = st.slider(
+                "RSI Period",
+                min_value=7,
+                max_value=28,
+                value=14,
+                help="RSI calculation period"
+            )
+
+        with col3:
+            rsi_oversold = st.slider(
+                "RSI Oversold",
+                min_value=10,
+                max_value=40,
+                value=30,
+                help="RSI level considered oversold"
+            )
+            rsi_overbought = st.slider(
+                "RSI Overbought",
+                min_value=60,
+                max_value=90,
+                value=70,
+                help="RSI level considered overbought"
+            )
+
+        if fast_ma >= slow_ma:
+            st.error("❌ Fast MA must be smaller than Slow MA.")
+            st.stop()
+
+        strategy_params = {
+            "fast_ma": fast_ma,
+            "slow_ma": slow_ma,
+            "rsi_period": rsi_period,
+            "rsi_oversold": float(rsi_oversold),
+            "rsi_overbought": float(rsi_overbought),
+        }
+
+    elif strategy == "breakout":
+        st.markdown("#### 💥 Breakout Parameters")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            lookback_period = st.slider(
+                "Lookback Period",
+                min_value=5,
+                max_value=60,
+                value=20,
+                help="Period for support/resistance calculation"
+            )
+
+        with col2:
+            breakout_threshold = st.slider(
+                "Breakout Threshold (%)",
+                min_value=0.5,
+                max_value=5.0,
+                value=2.0,
+                step=0.5,
+                help="Percentage above/below for breakout confirmation"
+            )
+
+        strategy_params = {
+            "lookback_period": lookback_period,
+            "breakout_threshold": breakout_threshold / 100,
+        }
+
+    elif strategy == "macd":
+        st.markdown("#### 📊 MACD Parameters")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            macd_fast = st.slider(
+                "Fast Period (EMA)",
+                min_value=5,
+                max_value=20,
+                value=12,
+                help="Fast exponential moving average period"
+            )
+
+        with col2:
+            macd_slow = st.slider(
+                "Slow Period (EMA)",
+                min_value=15,
+                max_value=50,
+                value=26,
+                help="Slow exponential moving average period"
+            )
+
+        with col3:
+            macd_signal = st.slider(
+                "Signal Period",
+                min_value=5,
+                max_value=15,
+                value=9,
+                help="Signal line smoothing period"
+            )
+
+        if macd_fast >= macd_slow:
+            st.error("❌ Fast period must be smaller than slow period.")
+            st.stop()
+
+        strategy_params = {
+            "macd_fast": macd_fast,
+            "macd_slow": macd_slow,
+            "macd_signal": macd_signal,
+        }
 
     # =============================================================================
     # Run Backtest
     # =============================================================================
 
-    st.markdown("### 4. Run Backtest")
+    st.markdown("---")
+    st.markdown("### 4️⃣ Execute Backtest")
 
-    if st.button("▶️ Run Strategy", type="primary"):
-        with st.spinner("Running backtest simulation..."):
+    if st.button("▶️ Run Backtest", type="primary", use_container_width=True):
+        with st.spinner("🔄 Running backtest simulation..."):
             try:
                 # Execute backtest
                 df_trades, position_open = backtest(
-                    backtest_strategy="ratio",
+                    backtest_strategy=strategy,
                     start_date=start_date,
                     end_date=end_date,
                     df=df,
-                    up_exit=up_exit,
-                    down_entry=down_entry,
                     commodity_chosen=commodity_chosen,
-                    commodity_ratio=commodity_ratio,
+                    commodity_ratio=commodity_ratio if strategy == "ratio" else "",
                     tons_conversion=tons_conversion,
                     contract_size=contract_sizes[commodity_chosen],
+                    stop_loss_pct=stop_loss_pct,
+                    take_profit_pct=take_profit_pct,
+                    **strategy_params
                 )
 
                 if df_trades.empty:
                     st.warning(
                         "⚠️ No trades were executed with the selected parameters. "
-                        "Try adjusting the entry/exit levels."
+                        "Try adjusting the strategy parameters."
                     )
                     st.stop()
 
-                # Calculate P&L
+                # Calculate P&L with transaction costs
                 df_trades_final, mtm_trade = pnl_trades(
                     df_trades=df_trades,
                     df_prices=df,
@@ -300,18 +674,43 @@ if st.session_state.confirmed_dates:
                     tons_conversion=tons_conversion,
                     contract_size=contract_sizes[commodity_chosen],
                     position_open=position_open,
+                    commission_per_trade=commission_per_trade,
+                    slippage_pct=slippage_pct,
                 )
 
                 # Calculate performance metrics
-                metrics = backtest_performance(
-                    df_trades_final,
-                    df,
-                    mtm_trade,
-                    contract_size=contract_sizes[commodity_chosen],
-                    tons_conversion=tons_conversion,
-                    commodity_chosen=commodity_chosen,
-                    position_open=position_open
-                )
+                if show_advanced_metrics:
+                    metrics = backtest_performance_extended(
+                        df_trades_final,
+                        df,
+                        mtm_trade,
+                        contract_size=contract_sizes[commodity_chosen],
+                        tons_conversion=tons_conversion,
+                        commodity_chosen=commodity_chosen,
+                        position_open=position_open
+                    )
+                else:
+                    metrics = backtest_performance(
+                        df_trades_final,
+                        df,
+                        mtm_trade,
+                        contract_size=contract_sizes[commodity_chosen],
+                        tons_conversion=tons_conversion,
+                        commodity_chosen=commodity_chosen,
+                        position_open=position_open
+                    )
+
+                # Store results in session state
+                st.session_state.backtest_results = {
+                    "df_trades": df_trades_final,
+                    "metrics": metrics,
+                    "mtm_trade": mtm_trade,
+                    "position_open": position_open,
+                    "strategy": strategy,
+                    "commodity": commodity_chosen,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
 
                 # =============================================================================
                 # Display Results
@@ -320,55 +719,167 @@ if st.session_state.confirmed_dates:
                 st.markdown("---")
                 st.markdown("## 📊 Backtest Results")
 
-                # Key metrics summary
-                col1, col2, col3, col4 = st.columns(4)
+                # Key metrics summary with color coding
+                col1, col2, col3, col4, col5 = st.columns(5)
 
                 total_profit = metrics[metrics["Metric"] == "Total Profit (USD)"]["Value"].values[0]
                 win_rate = metrics[metrics["Metric"] == "Win Rate (%)"]["Value"].values[0]
                 sharpe = metrics[metrics["Metric"] == "Sharpe Ratio"]["Value"].values[0]
                 max_dd = metrics[metrics["Metric"] == "Max Drawdown (USD)"]["Value"].values[0]
+                total_trades = metrics[metrics["Metric"] == "Complete Trades"]["Value"].values[0]
 
-                col1.metric("Total Profit", f"${total_profit:,.2f}")
+                col1.metric(
+                    "Total Profit",
+                    f"${total_profit:,.2f}",
+                    delta=f"{'Profit' if total_profit > 0 else 'Loss'}"
+                )
                 col2.metric("Win Rate", f"{win_rate:.1f}%")
                 col3.metric("Sharpe Ratio", f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A")
                 col4.metric("Max Drawdown", f"${max_dd:,.2f}")
+                col5.metric("Total Trades", f"{int(total_trades)}")
 
-                # Full metrics table
-                st.markdown("#### Detailed Metrics")
+                # Additional metrics if extended
+                if show_advanced_metrics:
+                    st.markdown("#### 📈 Advanced Metrics")
 
-                metrics_display = metrics.copy()
-                metrics_display["Value"] = metrics_display["Value"].apply(
-                    lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) and pd.notna(x) else "N/A"
-                )
+                    adv_col1, adv_col2, adv_col3, adv_col4 = st.columns(4)
 
-                st.dataframe(
-                    metrics_display,
-                    use_container_width=True,
-                    hide_index=True
-                )
+                    # Get extended metrics
+                    try:
+                        sortino = metrics[metrics["Metric"] == "Sortino Ratio"]["Value"].values[0]
+                        profit_factor = metrics[metrics["Metric"] == "Profit Factor"]["Value"].values[0]
+                        avg_win = metrics[metrics["Metric"] == "Average Win (USD)"]["Value"].values[0]
+                        avg_loss = metrics[metrics["Metric"] == "Average Loss (USD)"]["Value"].values[0]
+
+                        adv_col1.metric("Sortino Ratio", f"{sortino:.2f}" if pd.notna(sortino) else "N/A")
+                        adv_col2.metric("Profit Factor", f"{profit_factor:.2f}" if pd.notna(profit_factor) else "N/A")
+                        adv_col3.metric("Avg Win", f"${avg_win:,.2f}" if pd.notna(avg_win) else "N/A")
+                        adv_col4.metric("Avg Loss", f"${avg_loss:,.2f}" if pd.notna(avg_loss) else "N/A")
+                    except (IndexError, KeyError):
+                        pass
+
+                # Full metrics table in expandable section
+                with st.expander("📋 View All Metrics", expanded=False):
+                    metrics_display = metrics.copy()
+                    metrics_display["Value"] = metrics_display["Value"].apply(
+                        lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) and pd.notna(x) else "N/A"
+                    )
+                    st.dataframe(
+                        metrics_display,
+                        use_container_width=True,
+                        hide_index=True
+                    )
 
                 # Charts
-                st.markdown("#### Interactive Charts")
+                st.markdown("#### 📈 Interactive Charts")
 
-                backtest_charts(
-                    df_prices=df,
-                    df_trades=df_trades_final,
-                    commodity_chosen=commodity_chosen,
-                    down_entry=down_entry,
-                    up_exit=up_exit,
-                    start_date=start_date,
-                    end_date=end_date,
-                    mtm_trade=mtm_trade,
-                    tons_conversion=tons_conversion,
-                    use_streamlit=True
-                )
+                chart_tabs = st.tabs(["Price & Signals", "Strategy Indicator", "P&L Evolution"])
+
+                with chart_tabs[0]:
+                    backtest_charts(
+                        df_prices=df,
+                        df_trades=df_trades_final,
+                        commodity_chosen=commodity_chosen,
+                        down_entry=strategy_params.get("down_entry", 0),
+                        up_exit=strategy_params.get("up_exit", 0),
+                        start_date=start_date,
+                        end_date=end_date,
+                        mtm_trade=mtm_trade,
+                        tons_conversion=tons_conversion,
+                        use_streamlit=True,
+                        chart_type="price"
+                    )
+
+                with chart_tabs[1]:
+                    if strategy == "ratio":
+                        backtest_charts(
+                            df_prices=df,
+                            df_trades=df_trades_final,
+                            commodity_chosen=commodity_chosen,
+                            down_entry=strategy_params.get("down_entry", 0),
+                            up_exit=strategy_params.get("up_exit", 0),
+                            start_date=start_date,
+                            end_date=end_date,
+                            mtm_trade=mtm_trade,
+                            tons_conversion=tons_conversion,
+                            use_streamlit=True,
+                            chart_type="ratio"
+                        )
+                    else:
+                        st.info("Strategy indicator chart available for Ratio strategy only.")
+
+                with chart_tabs[2]:
+                    backtest_charts(
+                        df_prices=df,
+                        df_trades=df_trades_final,
+                        commodity_chosen=commodity_chosen,
+                        down_entry=strategy_params.get("down_entry", 0),
+                        up_exit=strategy_params.get("up_exit", 0),
+                        start_date=start_date,
+                        end_date=end_date,
+                        mtm_trade=mtm_trade,
+                        tons_conversion=tons_conversion,
+                        use_streamlit=True,
+                        chart_type="pnl"
+                    )
 
                 # Trade log
-                st.markdown("#### Trade Log")
+                if show_trade_log:
+                    st.markdown("#### 📝 Trade Log")
 
-                trades_display = df_trades_final.copy()
-                trades_display.index = trades_display.index.strftime("%Y-%m-%d")
-                st.dataframe(trades_display, use_container_width=True)
+                    trades_display = df_trades_final.copy()
+                    trades_display.index = trades_display.index.strftime("%Y-%m-%d")
+
+                    # Add color formatting for position
+                    st.dataframe(
+                        trades_display,
+                        use_container_width=True,
+                        column_config={
+                            "position": st.column_config.TextColumn("Position"),
+                            "trade_price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                            "pnl_usd": st.column_config.NumberColumn("P&L", format="$%.2f"),
+                            "pnl_usd_cumsum": st.column_config.NumberColumn("Cumulative P&L", format="$%.2f"),
+                        }
+                    )
+
+                # Export functionality
+                st.markdown("#### 📥 Export Results")
+
+                export_col1, export_col2, export_col3 = st.columns(3)
+
+                with export_col1:
+                    # Export trades to CSV
+                    csv_trades = df_trades_final.to_csv()
+                    st.download_button(
+                        label="📥 Download Trades (CSV)",
+                        data=csv_trades,
+                        file_name=f"trades_{commodity_chosen}_{strategy}_{datetime.date.today()}.csv",
+                        mime="text/csv"
+                    )
+
+                with export_col2:
+                    # Export metrics to CSV
+                    csv_metrics = metrics.to_csv(index=False)
+                    st.download_button(
+                        label="📊 Download Metrics (CSV)",
+                        data=csv_metrics,
+                        file_name=f"metrics_{commodity_chosen}_{strategy}_{datetime.date.today()}.csv",
+                        mime="text/csv"
+                    )
+
+                with export_col3:
+                    # Export to Excel (trades + metrics in different sheets)
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df_trades_final.to_excel(writer, sheet_name='Trades')
+                        metrics.to_excel(writer, sheet_name='Metrics', index=False)
+
+                    st.download_button(
+                        label="📑 Download Full Report (Excel)",
+                        data=buffer.getvalue(),
+                        file_name=f"backtest_report_{commodity_chosen}_{strategy}_{datetime.date.today()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
             except BacktestError as e:
                 st.error(f"❌ Backtest error: {e}")
@@ -385,9 +896,14 @@ if st.session_state.confirmed_dates:
 st.markdown("---")
 st.markdown(
     """
-    <div style='text-align: center; color: #666; font-size: 0.9em;'>
-        Commodity Backtester v1.0.0 | Developed by Diego Rossi |
+    <div style='text-align: center; color: #666; font-size: 0.9em; padding: 20px;'>
+        <strong>Commodity Backtester Pro v2.0.0</strong> | Developed by Diego Rossi |
         <a href='https://github.com/rossi-diego/commodity-backtester' target='_blank'>GitHub</a>
+        <br><br>
+        <span style='font-size: 0.8em;'>
+            ⚠️ Disclaimer: This tool is for educational purposes only. Past performance does not guarantee future results.
+            Always conduct thorough research before making trading decisions.
+        </span>
     </div>
     """,
     unsafe_allow_html=True

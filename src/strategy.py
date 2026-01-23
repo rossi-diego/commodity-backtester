@@ -35,6 +35,7 @@ class StrategyType(Enum):
     MEAN_REVERSION = "mean_reversion"
     MOMENTUM = "momentum"
     BREAKOUT = "breakout"
+    MACD = "macd"
 
 
 @dataclass
@@ -115,6 +116,15 @@ class StrategyConfig:
     lookback_period: int = 20
     breakout_threshold: float = 0.02
     volume_confirmation: bool = False
+
+    # MACD parameters
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+
+    # Risk management parameters
+    stop_loss_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
 
 
 class BacktestError(Exception):
@@ -244,6 +254,40 @@ def calculate_atr(
     atr = true_range.rolling(window=period).mean()
 
     return atr
+
+
+def calculate_macd(
+    prices: pd.Series,
+    fast_period: int = 12,
+    slow_period: int = 26,
+    signal_period: int = 9
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Calculate MACD (Moving Average Convergence Divergence).
+
+    Args:
+        prices: Series of prices
+        fast_period: Fast EMA period (default: 12)
+        slow_period: Slow EMA period (default: 26)
+        signal_period: Signal line period (default: 9)
+
+    Returns:
+        Tuple of (macd_line, signal_line, histogram)
+    """
+    # Calculate EMAs
+    ema_fast = prices.ewm(span=fast_period, adjust=False).mean()
+    ema_slow = prices.ewm(span=slow_period, adjust=False).mean()
+
+    # MACD line
+    macd_line = ema_fast - ema_slow
+
+    # Signal line
+    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+
+    # Histogram
+    histogram = macd_line - signal_line
+
+    return macd_line, signal_line, histogram
 
 
 # =============================================================================
@@ -567,6 +611,132 @@ def _execute_breakout_strategy(
     return trades, position_open
 
 
+def _execute_macd_strategy(
+    df_filtered: pd.DataFrame,
+    config: StrategyConfig
+) -> Tuple[List[Dict], bool]:
+    """
+    Execute MACD-based trading strategy.
+
+    Uses MACD crossovers for entry/exit:
+    - BUY: MACD line crosses above signal line (bullish crossover)
+    - SELL: MACD line crosses below signal line (bearish crossover)
+
+    Args:
+        df_filtered: Price data filtered to backtest period
+        config: Strategy configuration
+
+    Returns:
+        Tuple of (trades list, position open flag)
+    """
+    commodity = config.commodity_chosen
+    prices = df_filtered[commodity]
+
+    # Calculate MACD
+    macd_line, signal_line, histogram = calculate_macd(
+        prices,
+        fast_period=config.macd_fast,
+        slow_period=config.macd_slow,
+        signal_period=config.macd_signal
+    )
+
+    df_filtered["macd"] = macd_line
+    df_filtered["macd_signal"] = signal_line
+    df_filtered["macd_histogram"] = histogram
+
+    trades: List[Dict] = []
+    position_open = False
+    entry_price = 0.0
+
+    for idx, row in df_filtered.iterrows():
+        price = row[commodity]
+        macd = row["macd"]
+        signal = row["macd_signal"]
+
+        if pd.isna(macd) or pd.isna(signal):
+            continue
+
+        # Get previous values for crossover detection
+        prev_idx = df_filtered.index.get_loc(idx)
+        if prev_idx == 0:
+            continue
+
+        prev_row = df_filtered.iloc[prev_idx - 1]
+        prev_macd = prev_row["macd"]
+        prev_signal = prev_row["macd_signal"]
+
+        if pd.isna(prev_macd) or pd.isna(prev_signal):
+            continue
+
+        # Detect crossovers
+        bullish_crossover = (prev_macd <= prev_signal) and (macd > signal)
+        bearish_crossover = (prev_macd >= prev_signal) and (macd < signal)
+
+        # Risk management checks
+        if position_open and entry_price > 0:
+            pnl_pct = (price - entry_price) / entry_price * 100
+
+            # Stop loss check
+            if config.stop_loss_pct and pnl_pct <= -config.stop_loss_pct:
+                trades.append({
+                    "date": idx,
+                    "trade_price": price,
+                    "trade_ratio": np.nan,
+                    "position": "sell",
+                    "quantity": -1,
+                    "signal_value": macd - signal
+                })
+                position_open = False
+                entry_price = 0.0
+                logger.debug(f"STOP LOSS at {idx}: price={price:.2f}, loss={pnl_pct:.2f}%")
+                continue
+
+            # Take profit check
+            if config.take_profit_pct and pnl_pct >= config.take_profit_pct:
+                trades.append({
+                    "date": idx,
+                    "trade_price": price,
+                    "trade_ratio": np.nan,
+                    "position": "sell",
+                    "quantity": -1,
+                    "signal_value": macd - signal
+                })
+                position_open = False
+                entry_price = 0.0
+                logger.debug(f"TAKE PROFIT at {idx}: price={price:.2f}, gain={pnl_pct:.2f}%")
+                continue
+
+        # Entry signal: bullish MACD crossover
+        if bullish_crossover and not position_open:
+            trades.append({
+                "date": idx,
+                "trade_price": price,
+                "trade_ratio": np.nan,
+                "position": "buy",
+                "quantity": 1,
+                "signal_value": macd - signal
+            })
+            position_open = True
+            entry_price = price
+            logger.debug(f"BUY signal at {idx}: price={price:.2f}, MACD={macd:.4f}")
+
+        # Exit signal: bearish MACD crossover
+        elif bearish_crossover and position_open:
+            trades.append({
+                "date": idx,
+                "trade_price": price,
+                "trade_ratio": np.nan,
+                "position": "sell",
+                "quantity": -1,
+                "signal_value": macd - signal
+            })
+            position_open = False
+            entry_price = 0.0
+            logger.debug(f"SELL signal at {idx}: price={price:.2f}, MACD={macd:.4f}")
+
+    return trades, position_open
+
+
 # =============================================================================
 # Main Backtest Function
 # =============================================================================
@@ -664,7 +834,12 @@ def backtest(
         rsi_oversold=kwargs.get("rsi_oversold", 30.0),
         lookback_period=kwargs.get("lookback_period", window),
         breakout_threshold=kwargs.get("breakout_threshold", 0.02),
-        volume_confirmation=kwargs.get("volume_confirmation", False)
+        volume_confirmation=kwargs.get("volume_confirmation", False),
+        macd_fast=kwargs.get("macd_fast", 12),
+        macd_slow=kwargs.get("macd_slow", 26),
+        macd_signal=kwargs.get("macd_signal", 9),
+        stop_loss_pct=kwargs.get("stop_loss_pct"),
+        take_profit_pct=kwargs.get("take_profit_pct"),
     )
 
     trades: List[Dict] = []
@@ -692,6 +867,12 @@ def backtest(
 
     elif backtest_strategy == StrategyType.BREAKOUT.value:
         trades, position_open = _execute_breakout_strategy(
+            df_filtered=df_filtered,
+            config=config
+        )
+
+    elif backtest_strategy == StrategyType.MACD.value:
+        trades, position_open = _execute_macd_strategy(
             df_filtered=df_filtered,
             config=config
         )
@@ -767,6 +948,12 @@ def get_strategy_parameters(strategy_type: str) -> Dict[str, Any]:
             "lookback_period": 20,
             "breakout_threshold": 0.02,
         },
+        StrategyType.MACD.value: {
+            **common_params,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+        },
     }
 
     return strategy_params.get(strategy_type, common_params)
@@ -799,5 +986,10 @@ def get_available_strategies() -> List[Dict[str, str]]:
             "type": StrategyType.BREAKOUT.value,
             "name": "Breakout",
             "description": "Enter on resistance breakout, exit on support breakdown with trailing stop"
+        },
+        {
+            "type": StrategyType.MACD.value,
+            "name": "MACD Crossover",
+            "description": "Uses MACD line crossovers with signal line for entry/exit - good for trending markets"
         },
     ]

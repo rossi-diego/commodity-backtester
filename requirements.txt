@@ -18,6 +18,9 @@ plotly>=5.18.0
 # Excel Support (for data export)
 openpyxl>=3.1.0
 
+# Data Caching (parquet format)
+pyarrow>=14.0.0
+
 # Development Tools (optional)
 # jupyterlab>=4.0.0
 # ipykernel>=6.25.0
