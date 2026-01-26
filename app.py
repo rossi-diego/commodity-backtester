@@ -46,13 +46,13 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 st.set_page_config(
-    page_title="Commodity Backtester Pro",
+    page_title="Commodity Backtester",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for professional appearance
+# Custom CSS 
 st.markdown("""
     <style>
     .stApp {
@@ -216,31 +216,130 @@ STRATEGY_INFO = {
         "name": "Ratio Strategy",
         "icon": "📐",
         "description": "Trade based on price ratios between two commodities in metric ton terms. Ideal for spread trading.",
-        "best_for": "Spread trading, mean-reverting pairs"
+        "best_for": "Spread trading, mean-reverting pairs",
+        "details": """
+**How it works:** Calculates the price ratio between two related commodities (e.g., Soybean/Corn).
+When the ratio drops below the entry threshold, it signals that the primary commodity is relatively cheap → BUY.
+When the ratio rises above the exit threshold, the primary commodity is relatively expensive → SELL.
+
+**Key parameters:**
+- Entry Level: Ratio threshold to open a long position (typically mean - 1 std)
+- Exit Level: Ratio threshold to close the position (typically mean + 1 std)
+
+**When to use:**
+- Commodities with historical price correlation (e.g., grains, soy complex)
+- Markets showing mean-reverting behavior in relative prices
+- Hedging one commodity exposure against another
+
+**Risk considerations:**
+- Correlation breakdown during market stress
+- Structural shifts in supply/demand can change the equilibrium ratio
+        """
     },
     "mean_reversion": {
         "name": "Mean Reversion",
         "icon": "🔄",
         "description": "Uses Bollinger Bands to identify overbought/oversold conditions. Buys at lower band, sells at upper band.",
-        "best_for": "Range-bound markets, sideways trends"
+        "best_for": "Range-bound markets, sideways trends",
+        "details": """
+**How it works:** Bollinger Bands create a price envelope using a moving average ± N standard deviations.
+When price touches the lower band, the commodity is oversold → BUY.
+When price touches the upper band, it's overbought → SELL.
+
+**Key parameters:**
+- Window Period: Number of days for the moving average (default: 20)
+- Standard Deviations: Band width multiplier (default: 2.0)
+
+**When to use:**
+- Sideways or range-bound markets without strong trends
+- Commodities trading within established support/resistance levels
+- Markets with consistent volatility patterns
+
+**Risk considerations:**
+- Trend breakouts can cause significant losses if price continues beyond bands
+- Works poorly in strongly trending markets
+- May generate many small losses before capturing mean reversion
+        """
     },
     "momentum": {
         "name": "Momentum / Trend Following",
         "icon": "📈",
         "description": "Combines Moving Average crossover with RSI filter to follow established trends.",
-        "best_for": "Trending markets, directional moves"
+        "best_for": "Trending markets, directional moves",
+        "details": """
+**How it works:** Uses dual moving average crossover confirmed by RSI momentum.
+BUY when fast MA crosses above slow MA AND RSI is not overbought.
+SELL when fast MA crosses below slow MA OR RSI becomes overbought.
+
+**Key parameters:**
+- Fast MA Period: Short-term trend indicator (default: 10 days)
+- Slow MA Period: Long-term trend indicator (default: 30 days)
+- RSI Period: Momentum calculation window (default: 14)
+- RSI Thresholds: Overbought (70) and Oversold (30) levels
+
+**When to use:**
+- Commodities in clear uptrends or downtrends
+- Markets with sustained directional moves
+- After consolidation periods that may lead to breakouts
+
+**Risk considerations:**
+- Whipsaw signals in choppy, directionless markets
+- Late entries/exits due to MA lag
+- RSI can stay overbought/oversold for extended periods in strong trends
+        """
     },
     "breakout": {
         "name": "Breakout Strategy",
         "icon": "💥",
         "description": "Enters on resistance breakout with trailing stop. Captures large directional moves.",
-        "best_for": "Volatile markets, breakout patterns"
+        "best_for": "Volatile markets, breakout patterns",
+        "details": """
+**How it works:** Identifies price channels using recent highs/lows.
+BUY when price breaks above recent resistance by a threshold percentage.
+Exits using trailing stops or when price falls back into the range.
+
+**Key parameters:**
+- Lookback Period: Days to calculate support/resistance (default: 20)
+- Breakout Threshold: Required % above resistance to confirm breakout (default: 2%)
+
+**When to use:**
+- After consolidation periods with narrowing price ranges
+- Markets showing increased volatility or volume
+- Ahead of known catalysts (reports, seasonal patterns)
+
+**Risk considerations:**
+- False breakouts (price briefly breaks out then reverses)
+- Requires quick reaction time
+- Can be expensive if many false signals occur
+- Works best with volume confirmation (not implemented)
+        """
     },
     "macd": {
         "name": "MACD Crossover",
         "icon": "📊",
         "description": "Uses MACD line crossovers with signal line. Classic momentum indicator with built-in trend detection.",
-        "best_for": "Trending markets, momentum trading"
+        "best_for": "Trending markets, momentum trading",
+        "details": """
+**How it works:** MACD (Moving Average Convergence Divergence) measures trend momentum.
+BUY when MACD line crosses above the signal line (bullish crossover).
+SELL when MACD line crosses below the signal line (bearish crossover).
+
+**Key parameters:**
+- Fast Period: EMA for quick price response (default: 12)
+- Slow Period: EMA for underlying trend (default: 26)
+- Signal Period: Smoothing for the signal line (default: 9)
+
+**When to use:**
+- Trending markets with clear directional bias
+- Identifying trend reversals and momentum shifts
+- Confirming price breakouts with momentum
+
+**Risk considerations:**
+- Lagging indicator - signals come after price moves
+- Generates whipsaw signals in sideways markets
+- Best used with other confirmation indicators
+- MACD histogram divergence can provide early warnings
+        """
     }
 }
 
@@ -257,6 +356,10 @@ for idx, (strategy_key, info) in enumerate(STRATEGY_INFO.items()):
         with col2:
             if st.button(f"Select {info['name']}", key=f"btn_{strategy_key}", type="primary"):
                 st.session_state.selected_strategy = strategy_key
+
+        # Show detailed strategy information
+        with st.expander("📖 Learn more about this strategy", expanded=False):
+            st.markdown(info.get("details", "No additional details available."))
 
 # Get selected strategy from session state
 strategy = st.session_state.get("selected_strategy", None)
@@ -730,7 +833,8 @@ if st.session_state.confirmed_dates:
                 col1.metric(
                     "Total Profit",
                     f"${total_profit:,.2f}",
-                    delta=f"{'Profit' if total_profit > 0 else 'Loss'}"
+                    delta=f"${total_profit:,.2f}",
+                    delta_color="normal"
                 )
                 col2.metric("Win Rate", f"{win_rate:.1f}%")
                 col3.metric("Sharpe Ratio", f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A")
@@ -825,6 +929,29 @@ if st.session_state.confirmed_dates:
                 # Trade log
                 if show_trade_log:
                     st.markdown("#### 📝 Trade Log")
+
+                    with st.expander("ℹ️ Understanding the Trade Log", expanded=False):
+                        st.markdown("""
+**Column Descriptions:**
+
+| Column | Description |
+|--------|-------------|
+| **Date** | Trade execution date |
+| **Position** | `buy` = entry (long position opened), `sell` = exit (position closed) |
+| **Price** | Execution price in the commodity's native unit (e.g., cents/bushel for grains) |
+| **P&L** | Profit/Loss in USD for completed trades. Only recorded on `sell` trades (when position is closed). Positive = profit, negative = loss |
+| **Cumulative P&L** | Running total of all realized P&L up to that point |
+
+**How P&L is Calculated:**
+- P&L = (Sell Price - Buy Price) × Conversion Factor × Contract Size
+- If transaction costs are enabled, commission and slippage are deducted
+- The conversion factor transforms the quoted price (e.g., cents/bushel) to $/metric ton
+
+**Notes:**
+- Trades are paired as buy-sell sequences
+- An open position (unpaired buy) shows MTM (Mark-to-Market) adjustment in the metrics
+- VaR (Value at Risk) represents the potential loss at 95% confidence based on historical price volatility
+                        """)
 
                     trades_display = df_trades_final.copy()
                     trades_display.index = trades_display.index.strftime("%Y-%m-%d")

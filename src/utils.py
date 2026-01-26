@@ -77,8 +77,9 @@ def pnl_trades(
     df_trades["commission"] = 0.0
     df_trades["slippage"] = 0.0
 
-    # Contract value in tons
-    contract_tons = contract_size * tons_conversion[commodity_chosen]
+    # Contract size is already in metric tons
+    # tons_conversion is only for PRICE conversion (e.g., cents/bushel -> $/ton)
+    contract_tons = contract_size
     conversion_factor = tons_conversion[commodity_chosen]
 
     # Calculate P&L for completed trades (buy-sell pairs)
