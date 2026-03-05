@@ -18,7 +18,6 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
@@ -131,6 +130,22 @@ def backtest(
         contract_size=contract_size,
         stop_loss_pct=stop_loss_pct,
         take_profit_pct=take_profit_pct,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
+
+def _compute_ratio(
+    df: pd.DataFrame,
+    commodity_chosen: str,
+    commodity_ratio: str,
+    tons_conversion: dict[str, float],
+) -> pd.Series:
+    """Return the metric-ton price ratio between two commodities."""
+    return (df[commodity_chosen] * tons_conversion[commodity_chosen]) / (
+        df[commodity_ratio] * tons_conversion[commodity_ratio]
     )
 
 

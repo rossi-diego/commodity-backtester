@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -64,7 +63,7 @@ class TestBacktest:
             contract_size=contract_sz,
         )
         if not df_trades.empty:
-            assert set(["trade_price", "trade_ratio", "position", "quantity", "VaR_95"]).issubset(
+            assert {"trade_price", "trade_ratio", "position", "quantity", "VaR_95"}.issubset(
                 df_trades.columns
             )
 

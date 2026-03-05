@@ -174,9 +174,8 @@ def _build_metrics(
     gross_loss   = abs(float(df_trades.loc[df_trades["pnl_usd"] < 0, "pnl_usd"].sum()))
 
     gross_exposure = 0.0
-    if position_open and com and tons_conv and not df_trades.empty:
-        if df_trades.iloc[-1]["position"] == "buy":
-            gross_exposure = c_size * tons_conv[com] * float(df_prices[com].iloc[-1])
+    if position_open and com and tons_conv and not df_trades.empty and df_trades.iloc[-1]["position"] == "buy":
+        gross_exposure = c_size * tons_conv[com] * float(df_prices[com].iloc[-1])
 
     var_95 = 0.0
     if gross_exposure and com:
