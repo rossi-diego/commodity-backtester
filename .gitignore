@@ -1,11 +1,49 @@
-# Ignore virtual environments
+# ── Virtual environments ───────────────────────────────────────────────────────
 .venv/
+venv/
 env/
+backtest/
+*.venv
+
+# ── Python cache ───────────────────────────────────────────────────────────────
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Jupyter ────────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
+*.ipynb_checkpoints
 
-# Ignore data or output folders
+# ── Testing & coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
 
+# ── Type checking ──────────────────────────────────────────────────────────────
+.mypy_cache/
 
-# Ignore system files
+# ── Ruff ───────────────────────────────────────────────────────────────────────
+.ruff_cache/
+
+# ── Environment / secrets ──────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Data & output ──────────────────────────────────────────────────────────────
+data/*.csv
+data/*.parquet
+data/*.xlsx
+results/
+
+# ── OS ─────────────────────────────────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+desktop.ini

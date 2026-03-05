@@ -1,619 +1,304 @@
 """
-Utility functions for backtesting calculations.
+Trade-level PnL calculation and performance analytics.
 
-This module provides functions for:
-- P&L calculations (realized and mark-to-market)
-- Performance metrics computation (basic and extended)
-- Strategy statistics
-- Transaction cost handling
+All metrics follow standard quantitative finance conventions:
+
+- **Sharpe ratio** — annualised, computed on daily equity-curve returns
+  (not per-trade PnL, which is the incorrect but common approach)
+- **Sortino ratio** — same as Sharpe but uses downside deviation
+- **Calmar ratio** — annualised return / maximum drawdown
+- **Profit factor** — gross profit / |gross loss|
+- **Recovery factor** — total profit / maximum drawdown
 """
 
-import logging
+from __future__ import annotations
+
+import datetime
 from itertools import permutations
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-from src.config import TRADING_DAYS_PER_YEAR
+from .constants import commodities_dict, contract_sizes, tons_conversion
 
-# Configure module logger
-logger = logging.getLogger(__name__)
+ANNUALISATION_FACTOR = np.sqrt(252)
 
+
+# ---------------------------------------------------------------------------
+# PnL engine
+# ---------------------------------------------------------------------------
 
 def pnl_trades(
     df_trades: pd.DataFrame,
     df_prices: pd.DataFrame,
     commodity_chosen: str,
-    tons_conversion: Dict[str, float],
+    tons_conversion: dict[str, float],
     contract_size: float,
     position_open: bool,
-    commission_per_trade: float = 0.0,
-    slippage_pct: float = 0.0,
-) -> Tuple[pd.DataFrame, Optional[Dict]]:
-    """
-    Calculate realized and unrealized P&L for all trades.
+) -> tuple[pd.DataFrame, dict[str, object] | None]:
+    """Calculate round-trip PnL for every completed buy/sell pair.
 
-    Matches buy/sell pairs and calculates profit/loss for each closed trade.
-    If a position is still open, calculates mark-to-market adjustment.
-    Supports transaction costs (commission and slippage).
+    Parameters
+    ----------
+    df_trades:
+        Output of :func:`strategy.backtest`.
+    df_prices:
+        Full price DataFrame (used for MTM valuation).
+    commodity_chosen:
+        Primary commodity display name.
+    tons_conversion:
+        Price-to-USD-per-MT factors.
+    contract_size:
+        Metric tons per contract.
+    position_open:
+        Whether the last trade is an unclosed long.
 
-    Args:
-        df_trades: DataFrame containing trade records
-        df_prices: DataFrame with price history
-        commodity_chosen: Name of the traded commodity
-        tons_conversion: Dictionary of tons conversion factors
-        contract_size: Size of one contract
-        position_open: Whether there's an open position
-        commission_per_trade: Fixed commission per trade (default: 0)
-        slippage_pct: Slippage as percentage of price (default: 0)
-
-    Returns:
-        Tuple containing:
-            - DataFrame with P&L columns added
-            - MTM trade dict (or None if no open position)
-
-    Example:
-        >>> trades_with_pnl, mtm = pnl_trades(
-        ...     df_trades=trades_df,
-        ...     df_prices=prices_df,
-        ...     commodity_chosen="Soybean",
-        ...     tons_conversion=tons_conv,
-        ...     contract_size=136.0,
-        ...     position_open=False,
-        ...     commission_per_trade=2.50,
-        ...     slippage_pct=0.001
-        ... )
+    Returns
+    -------
+    df_trades:
+        Input frame augmented with ``pnl_usd`` and ``pnl_usd_cumsum`` columns.
+    mtm_trade:
+        ``{"date": ..., "pnl_usd": float}`` for the open position, or ``None``.
     """
     df_trades = df_trades.copy()
-    mtm_trade: Optional[Dict] = None
+    mtm_trade: dict[str, object] | None = None
 
     if df_trades.empty:
-        logger.warning("No trades to calculate P&L")
         return df_trades, mtm_trade
 
-    # Initialize P&L columns
+    contract_tons = contract_size * tons_conversion[commodity_chosen]
     df_trades["pnl_usd"] = 0.0
-    df_trades["commission"] = 0.0
-    df_trades["slippage"] = 0.0
 
-    # Contract size is already in metric tons
-    # tons_conversion is only for PRICE conversion (e.g., cents/bushel -> $/ton)
-    contract_tons = contract_size
-    conversion_factor = tons_conversion[commodity_chosen]
-
-    # Calculate P&L for completed trades (buy-sell pairs)
+    # Pair up buys and sells (indices 0,1 | 2,3 | ...)
     for i in range(0, len(df_trades) - 1, 2):
-        buy_trade = df_trades.iloc[i]
-        sell_trade = df_trades.iloc[i + 1]
+        buy_row  = df_trades.iloc[i]
+        sell_row = df_trades.iloc[i + 1]
+        buy_price_mt  = float(buy_row["trade_price"])  * tons_conversion[commodity_chosen]
+        sell_price_mt = float(sell_row["trade_price"]) * tons_conversion[commodity_chosen]
+        pnl = (sell_price_mt - buy_price_mt) * contract_tons
+        df_trades.at[sell_row.name, "pnl_usd"] = round(pnl, 2)
 
-        # Validate trade pair
-        if buy_trade["position"] != "buy" or sell_trade["position"] != "sell":
-            logger.warning(f"Invalid trade pair at index {i}: expected buy-sell")
-            continue
-
-        # Calculate slippage (adverse price movement)
-        buy_slippage = buy_trade["trade_price"] * slippage_pct
-        sell_slippage = sell_trade["trade_price"] * slippage_pct
-
-        # Adjusted prices after slippage
-        buy_price_adj = buy_trade["trade_price"] + buy_slippage
-        sell_price_adj = sell_trade["trade_price"] - sell_slippage
-
-        # Calculate P&L in USD
-        buy_price_per_ton = buy_price_adj * conversion_factor
-        sell_price_per_ton = sell_price_adj * conversion_factor
-
-        gross_pnl = (sell_price_per_ton - buy_price_per_ton) * contract_tons
-
-        # Total commission for the round trip
-        total_commission = commission_per_trade * 2
-        total_slippage_cost = (buy_slippage + sell_slippage) * conversion_factor * contract_tons
-
-        # Net P&L
-        net_pnl = gross_pnl - total_commission
-
-        df_trades.at[sell_trade.name, "pnl_usd"] = net_pnl
-        df_trades.at[buy_trade.name, "commission"] = commission_per_trade
-        df_trades.at[sell_trade.name, "commission"] = commission_per_trade
-        df_trades.at[buy_trade.name, "slippage"] = buy_slippage * conversion_factor * contract_tons
-        df_trades.at[sell_trade.name, "slippage"] = sell_slippage * conversion_factor * contract_tons
-
-    # Calculate cumulative P&L
     df_trades["pnl_usd_cumsum"] = df_trades["pnl_usd"].cumsum()
 
-    # Calculate MTM for open position
-    if position_open and not df_trades.empty:
-        last_trade = df_trades.iloc[-1]
-
-        if last_trade["position"] == "buy":
-            last_market_price = df_prices[commodity_chosen].iloc[-1]
-
-            buy_price_per_ton = last_trade["trade_price"] * conversion_factor
-            market_price_per_ton = last_market_price * conversion_factor
-
-            mtm_pnl = (market_price_per_ton - buy_price_per_ton) * contract_tons
-
-            # Deduct estimated exit costs
-            mtm_pnl -= commission_per_trade
-            mtm_pnl -= (last_market_price * slippage_pct * conversion_factor * contract_tons)
-
-            mtm_trade = {
-                "date": df_prices.index[-1],
-                "pnl_usd": mtm_pnl
-            }
-
-            logger.info(f"Open position MTM: ${mtm_pnl:,.2f}")
+    # ── Mark-to-market for unclosed long ─────────────────────────────────────
+    if position_open and df_trades.iloc[-1]["position"] == "buy":
+        last_buy_price = float(df_trades.iloc[-1]["trade_price"])
+        last_price     = float(df_prices[commodity_chosen].iloc[-1])
+        buy_mt   = last_buy_price * tons_conversion[commodity_chosen]
+        last_mt  = last_price     * tons_conversion[commodity_chosen]
+        mtm_pnl  = (last_mt - buy_mt) * contract_tons
+        mtm_trade = {
+            "date":    df_prices.index[-1],
+            "pnl_usd": round(mtm_pnl, 2),
+        }
 
     return df_trades, mtm_trade
 
 
+# ---------------------------------------------------------------------------
+# Performance metrics
+# ---------------------------------------------------------------------------
+
 def backtest_performance(
     df_trades: pd.DataFrame,
     df_prices: pd.DataFrame,
-    mtm_trade: Optional[Dict] = None,
-    contract_size: Optional[float] = None,
-    tons_conversion: Optional[Dict[str, float]] = None,
-    commodity_chosen: Optional[str] = None,
-    position_open: Optional[bool] = None
+    mtm_trade: dict[str, object] | None = None,
+    contract_size: float | None = None,
+    tons_conversion: dict[str, float] | None = None,
+    commodity_chosen: str | None = None,
+    position_open: bool = False,
 ) -> pd.DataFrame:
+    """Compute a comprehensive performance summary table.
+
+    Metrics
+    -------
+    Trade counts, realized/MTM/total profit, win rate, max drawdown,
+    Sharpe (annualised, daily returns), Sortino, Calmar, Profit Factor,
+    Recovery Factor, best/worst trade, mean duration, gross exposure, VaR 95%.
+
+    Returns
+    -------
+    DataFrame with columns ``["Metric", "Value"]``.
     """
-    Calculate comprehensive performance metrics for a backtest.
+    tons_conv  = tons_conversion or {}
+    com        = commodity_chosen or ""
+    c_size     = contract_size or 0.0
 
-    Args:
-        df_trades: DataFrame with trade records and P&L
-        df_prices: DataFrame with price history
-        mtm_trade: Mark-to-market adjustment dict (optional)
-        contract_size: Size of one contract
-        tons_conversion: Dictionary of tons conversion factors
-        commodity_chosen: Name of the traded commodity
-        position_open: Whether there's an open position
+    total_complete = int(len(df_trades) / 2)
+    realized_pnl   = float(df_trades["pnl_usd"].sum())
+    mtm_pnl        = float(mtm_trade["pnl_usd"]) if mtm_trade else 0.0
+    total_pnl      = realized_pnl + mtm_pnl
 
-    Returns:
-        DataFrame with performance metrics and their values
+    wins   = int((df_trades["pnl_usd"] > 0).sum())
+    losses = int((df_trades["pnl_usd"] < 0).sum())
+    win_rate = wins / total_complete if total_complete > 0 else 0.0
 
-    Metrics calculated:
-        - Total Buys/Sells
-        - Complete Trades
-        - Open Positions
-        - Realized/MTM/Total Profit
-        - Win Rate
-        - Max Drawdown
-        - Sharpe Ratio
-        - Best/Worst Trade
-        - Mean Trade Duration
-        - Gross Exposure
-        - VaR (95%)
-    """
-    # Basic trade counts
-    total_buys = (df_trades["position"] == "buy").sum()
-    total_sells = (df_trades["position"] == "sell").sum()
-    complete_trades = min(total_buys, total_sells)
-    open_positions = total_buys - total_sells
+    # ── Drawdown ──────────────────────────────────────────────────────────────
+    cum = df_trades["pnl_usd_cumsum"]
+    running_max  = np.maximum.accumulate(cum.values)
+    drawdown_ser = running_max - cum.values
+    max_drawdown = float(drawdown_ser.max()) if len(drawdown_ser) else 0.0
 
-    # P&L calculations
-    realized_profit = df_trades["pnl_usd"].sum()
-    mtm_profit = mtm_trade["pnl_usd"] if mtm_trade else 0.0
-    total_profit = realized_profit + mtm_profit
+    # ── Daily equity curve (needed for Sharpe / Sortino / Calmar) ─────────────
+    daily_equity  = _build_daily_equity(df_trades, df_prices, mtm_trade)
+    daily_returns = daily_equity.pct_change().dropna()
+    annual_return = _annualised_return(daily_equity)
 
-    # Win rate (only for completed trades)
-    if complete_trades > 0:
-        # P&L is recorded on sell trades
-        sell_trades_pnl = df_trades[df_trades["position"] == "sell"]["pnl_usd"]
-        win_trades = (sell_trades_pnl > 0).sum()
-        win_rate = win_trades / complete_trades
-    else:
-        win_rate = 0.0
+    sharpe  = _sharpe(daily_returns)
+    sortino = _sortino(daily_returns)
+    calmar  = _calmar(annual_return, max_drawdown)
 
-    # Drawdown calculation
-    if "pnl_usd_cumsum" in df_trades.columns and not df_trades["pnl_usd_cumsum"].empty:
-        cumulative_pnl = df_trades["pnl_usd_cumsum"]
-        running_max = cumulative_pnl.cummax()
-        drawdown = running_max - cumulative_pnl
-        max_drawdown = drawdown.max()
-    else:
-        max_drawdown = 0.0
+    # ── Profit factor & recovery factor ──────────────────────────────────────
+    gross_profit = float(df_trades.loc[df_trades["pnl_usd"] > 0, "pnl_usd"].sum())
+    gross_loss   = abs(float(df_trades.loc[df_trades["pnl_usd"] < 0, "pnl_usd"].sum()))
+    profit_factor   = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+    recovery_factor = total_pnl / max_drawdown  if max_drawdown > 0 else float("inf")
 
-    # Sharpe Ratio (annualized)
-    pnl_series = df_trades["pnl_usd"].dropna()
-    if len(pnl_series) > 1 and pnl_series.std() != 0:
-        sharpe_ratio = (pnl_series.mean() / pnl_series.std()) * np.sqrt(TRADING_DAYS_PER_YEAR)
-    else:
-        sharpe_ratio = np.nan
+    # ── Trade-level stats ─────────────────────────────────────────────────────
+    best_trade  = float(df_trades["pnl_usd"].max())
+    worst_trade = float(df_trades["pnl_usd"].min())
+    mean_duration_days = _mean_duration(df_trades)
 
-    # Best and worst trades
-    best_trade = df_trades["pnl_usd"].max() if not df_trades.empty else 0.0
-    worst_trade = df_trades["pnl_usd"].min() if not df_trades.empty else 0.0
+    backtest_days = int(
+        (df_prices.index[-1] - df_prices.index[0]).days
+    ) if len(df_prices) > 1 else 0
 
-    # Mean trade duration
-    if len(df_trades) >= 2:
-        trade_dates = pd.to_datetime(df_trades.index)
-        durations = trade_dates.to_series().diff().dropna()
-        mean_duration = durations.mean().days if not durations.empty else np.nan
-    else:
-        mean_duration = np.nan
-
-    # Backtest duration
-    if not df_prices.empty:
-        backtest_duration = (df_prices.index[-1] - df_prices.index[0]).days
-    else:
-        backtest_duration = 0
-
-    # Gross exposure calculation
+    # ── Gross exposure & VaR ─────────────────────────────────────────────────
     gross_exposure = 0.0
-    if (position_open and not df_trades.empty and
-            commodity_chosen and tons_conversion and contract_size):
+    if position_open and com and tons_conv and not df_trades.empty:
         if df_trades.iloc[-1]["position"] == "buy":
-            last_price = df_prices[commodity_chosen].iloc[-1]
-            gross_exposure = (
-                contract_size *
-                tons_conversion[commodity_chosen] *
-                last_price
-            )
+            last_price     = float(df_prices[com].iloc[-1])
+            gross_exposure = c_size * tons_conv[com] * last_price
 
-    # VaR calculation (Historical 95%)
     var_95 = 0.0
-    if commodity_chosen and not df_prices.empty and gross_exposure > 0:
-        returns = df_prices[commodity_chosen].pct_change().dropna()
-        if not returns.empty:
-            var_95 = np.percentile(returns, 5) * gross_exposure
+    if gross_exposure and com:
+        log_ret = np.log(
+            df_prices[com] / df_prices[com].shift(1)
+        ).dropna()
+        var_95 = abs(float(np.percentile(log_ret, 5))) * gross_exposure
 
-    # Build performance summary DataFrame
-    metrics = pd.DataFrame({
-        "Metric": [
-            "Total Buys",
-            "Total Sells",
-            "Complete Trades",
-            "Open Positions",
-            "Realized Profit (USD)",
-            "MTM Adjustment (USD)",
-            "Total Profit (USD)",
-            "Win Rate (%)",
-            "Max Drawdown (USD)",
-            "Sharpe Ratio",
-            "Best Trade (USD)",
-            "Worst Trade (USD)",
-            "Mean Trade Duration (days)",
-            "Backtest Duration (days)",
-            "Gross Exposure (USD)",
-            "VaR 95% (Historical - USD)"
-        ],
-        "Value": [
-            total_buys,
-            total_sells,
-            complete_trades,
-            open_positions,
-            realized_profit,
-            mtm_profit,
-            total_profit,
-            win_rate * 100,
-            max_drawdown,
-            sharpe_ratio,
-            best_trade,
-            worst_trade,
-            mean_duration,
-            backtest_duration,
-            gross_exposure,
-            var_95
-        ]
-    })
+    rows: list[tuple[str, object]] = [
+        ("Total Buys",                    int((df_trades["position"] == "buy").sum())),
+        ("Total Sells",                   int((df_trades["position"] == "sell").sum())),
+        ("Complete Trades",               total_complete),
+        ("Open Positions",                int((df_trades["position"] == "buy").sum()) - int((df_trades["position"] == "sell").sum())),
+        ("Realized Profit (USD)",         realized_pnl),
+        ("MTM Adjustment (USD)",          mtm_pnl),
+        ("Total Profit (USD)",            total_pnl),
+        ("Win Rate (%)",                  win_rate * 100),
+        ("Winning Trades",                wins),
+        ("Losing Trades",                 losses),
+        ("Max Drawdown (USD)",            max_drawdown),
+        ("Sharpe Ratio (ann.)",           sharpe),
+        ("Sortino Ratio (ann.)",          sortino),
+        ("Calmar Ratio",                  calmar),
+        ("Profit Factor",                 profit_factor),
+        ("Recovery Factor",               recovery_factor),
+        ("Best Trade (USD)",              best_trade),
+        ("Worst Trade (USD)",             worst_trade),
+        ("Mean Trade Duration (days)",    mean_duration_days),
+        ("Backtest Duration (days)",      backtest_days),
+        ("Gross Exposure (USD)",          gross_exposure),
+        ("VaR 95% — Historical (USD)",   var_95),
+    ]
 
-    return metrics.round(2)
-
-
-def backtest_performance_extended(
-    df_trades: pd.DataFrame,
-    df_prices: pd.DataFrame,
-    mtm_trade: Optional[Dict] = None,
-    contract_size: Optional[float] = None,
-    tons_conversion: Optional[Dict[str, float]] = None,
-    commodity_chosen: Optional[str] = None,
-    position_open: Optional[bool] = None
-) -> pd.DataFrame:
-    """
-    Calculate extended performance metrics including advanced risk measures.
-
-    This function extends the basic performance metrics with:
-    - Sortino Ratio (downside risk adjusted)
-    - Calmar Ratio (return vs max drawdown)
-    - Profit Factor (gross profit / gross loss)
-    - Average Win/Loss amounts
-    - Consecutive wins/losses
-    - Recovery Factor
-
-    Args:
-        df_trades: DataFrame with trade records and P&L
-        df_prices: DataFrame with price history
-        mtm_trade: Mark-to-market adjustment dict (optional)
-        contract_size: Size of one contract
-        tons_conversion: Dictionary of tons conversion factors
-        commodity_chosen: Name of the traded commodity
-        position_open: Whether there's an open position
-
-    Returns:
-        DataFrame with extended performance metrics
-    """
-    # Get basic metrics first
-    basic_metrics = backtest_performance(
-        df_trades, df_prices, mtm_trade, contract_size,
-        tons_conversion, commodity_chosen, position_open
+    df_out = pd.DataFrame(rows, columns=["Metric", "Value"])
+    # Round only numeric rows
+    df_out["Value"] = df_out["Value"].apply(
+        lambda v: round(v, 4) if isinstance(v, float) else v
     )
+    return df_out
 
-    # Extract needed values
-    sell_trades = df_trades[df_trades["position"] == "sell"]
-    pnl_series = sell_trades["pnl_usd"].dropna()
 
-    # Sortino Ratio (using downside deviation)
-    if len(pnl_series) > 1:
-        downside_returns = pnl_series[pnl_series < 0]
-        if len(downside_returns) > 0 and downside_returns.std() != 0:
-            sortino_ratio = (pnl_series.mean() / downside_returns.std()) * np.sqrt(TRADING_DAYS_PER_YEAR)
-        else:
-            sortino_ratio = np.nan
-    else:
-        sortino_ratio = np.nan
-
-    # Profit Factor (gross profit / gross loss)
-    winning_trades = pnl_series[pnl_series > 0]
-    losing_trades = pnl_series[pnl_series < 0]
-
-    gross_profit = winning_trades.sum() if len(winning_trades) > 0 else 0
-    gross_loss = abs(losing_trades.sum()) if len(losing_trades) > 0 else 0
-
-    if gross_loss > 0:
-        profit_factor = gross_profit / gross_loss
-    else:
-        profit_factor = np.inf if gross_profit > 0 else np.nan
-
-    # Average win and average loss
-    avg_win = winning_trades.mean() if len(winning_trades) > 0 else 0
-    avg_loss = losing_trades.mean() if len(losing_trades) > 0 else 0
-
-    # Win/Loss statistics
-    num_wins = len(winning_trades)
-    num_losses = len(losing_trades)
-
-    # Consecutive wins/losses
-    if len(pnl_series) > 0:
-        is_win = (pnl_series > 0).astype(int)
-        is_loss = (pnl_series < 0).astype(int)
-
-        # Calculate consecutive runs
-        win_groups = (is_win != is_win.shift()).cumsum()
-        loss_groups = (is_loss != is_loss.shift()).cumsum()
-
-        max_consecutive_wins = is_win.groupby(win_groups).sum().max()
-        max_consecutive_losses = is_loss.groupby(loss_groups).sum().max()
-    else:
-        max_consecutive_wins = 0
-        max_consecutive_losses = 0
-
-    # Calmar Ratio (annualized return / max drawdown)
-    total_profit = basic_metrics[basic_metrics["Metric"] == "Total Profit (USD)"]["Value"].values[0]
-    max_drawdown = basic_metrics[basic_metrics["Metric"] == "Max Drawdown (USD)"]["Value"].values[0]
-    backtest_duration = basic_metrics[basic_metrics["Metric"] == "Backtest Duration (days)"]["Value"].values[0]
-
-    if max_drawdown > 0 and backtest_duration > 0:
-        annualized_return = (total_profit / backtest_duration) * 365
-        calmar_ratio = annualized_return / max_drawdown
-    else:
-        calmar_ratio = np.nan
-
-    # Recovery Factor (total profit / max drawdown)
-    if max_drawdown > 0:
-        recovery_factor = total_profit / max_drawdown
-    else:
-        recovery_factor = np.nan
-
-    # Expectancy (average profit per trade)
-    if len(pnl_series) > 0:
-        expectancy = pnl_series.mean()
-    else:
-        expectancy = 0
-
-    # Total commissions and slippage (if tracked)
-    total_commission = df_trades["commission"].sum() if "commission" in df_trades.columns else 0
-    total_slippage = df_trades["slippage"].sum() if "slippage" in df_trades.columns else 0
-
-    # Add extended metrics
-    extended_metrics = pd.DataFrame({
-        "Metric": [
-            "Sortino Ratio",
-            "Calmar Ratio",
-            "Profit Factor",
-            "Average Win (USD)",
-            "Average Loss (USD)",
-            "Number of Wins",
-            "Number of Losses",
-            "Max Consecutive Wins",
-            "Max Consecutive Losses",
-            "Recovery Factor",
-            "Expectancy (USD/trade)",
-            "Total Commission (USD)",
-            "Total Slippage Cost (USD)",
-        ],
-        "Value": [
-            sortino_ratio,
-            calmar_ratio,
-            profit_factor,
-            avg_win,
-            avg_loss,
-            num_wins,
-            num_losses,
-            max_consecutive_wins,
-            max_consecutive_losses,
-            recovery_factor,
-            expectancy,
-            total_commission,
-            total_slippage,
-        ]
-    })
-
-    # Combine basic and extended metrics
-    all_metrics = pd.concat([basic_metrics, extended_metrics], ignore_index=True)
-
-    return all_metrics.round(2)
-
+# ---------------------------------------------------------------------------
+# Descriptive statistics for all spread ratios
+# ---------------------------------------------------------------------------
 
 def strategy_describe(
     df: pd.DataFrame,
-    tons_conversion: Dict[str, float],
-    backtest_strategy: Optional[str] = None
+    tons_conversion: dict[str, float],
+    backtest_strategy: str | None = None,
 ) -> pd.DataFrame:
-    """
-    Calculate descriptive statistics for commodity ratios.
+    """Return summary statistics for every ordered pair of commodities.
 
-    Generates statistics for all possible commodity pair ratios,
-    useful for identifying trading opportunities.
-
-    Args:
-        df: DataFrame with commodity prices
-        tons_conversion: Dictionary of tons conversion factors
-        backtest_strategy: Strategy type (only 'ratio' is supported)
-
-    Returns:
-        DataFrame with ratio statistics including:
-        - count, mean, std, min, 25%, 50%, 75%, max
-        - coefficient of variation
-
-    Example:
-        >>> stats = strategy_describe(
-        ...     df=prices_df,
-        ...     tons_conversion=tons_conv,
-        ...     backtest_strategy="ratio"
-        ... )
+    Only applicable for the ``"ratio"`` strategy.
     """
     if backtest_strategy != "ratio":
-        logger.info("Strategy describe only available for ratio strategy")
         return pd.DataFrame(index=df.index)
 
-    summary_list: List[pd.Series] = []
+    summary: list[pd.Series] = []
+    for col_a, col_b in permutations(df.columns, 2):
+        if col_a in tons_conversion and col_b in tons_conversion:
+            ratio = (df[col_a] * tons_conversion[col_a]) / (df[col_b] * tons_conversion[col_b])
+            stats = ratio.describe()
+            stats["coefficient_variation"] = stats["std"] / stats["mean"]
+            stats.name = f"{col_a}/{col_b}"
+            summary.append(stats)
 
-    # Calculate statistics for all commodity pairs
-    for col1, col2 in permutations(df.columns, 2):
-        if col1 in tons_conversion and col2 in tons_conversion:
-            ratio_name = f"{col1}/{col2}"
-
-            # Calculate ratio in metric ton terms
-            ratio_series = (
-                (df[col1] * tons_conversion[col1]) /
-                (df[col2] * tons_conversion[col2])
-            )
-
-            # Get descriptive statistics
-            stats = ratio_series.describe()
-            stats["coefficient variation"] = stats["std"] / stats["mean"]
-            stats.name = ratio_name
-            summary_list.append(stats)
-
-    if not summary_list:
-        logger.warning("No valid commodity pairs found for ratio calculation")
+    if not summary:
         return pd.DataFrame()
 
-    summary_df = pd.DataFrame(summary_list)
-    return summary_df.round(4)
+    return pd.DataFrame(summary).round(4)
 
 
-def calculate_drawdown_series(cumulative_pnl: pd.Series) -> Tuple[pd.Series, pd.Series]:
-    """
-    Calculate drawdown and drawdown percentage series.
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-    Args:
-        cumulative_pnl: Series of cumulative P&L values
-
-    Returns:
-        Tuple of (drawdown_series, drawdown_pct_series)
-    """
-    running_max = cumulative_pnl.cummax()
-    drawdown = running_max - cumulative_pnl
-
-    # Calculate percentage drawdown (avoiding division by zero)
-    drawdown_pct = pd.Series(index=cumulative_pnl.index, dtype=float)
-    mask = running_max > 0
-    drawdown_pct[mask] = (drawdown[mask] / running_max[mask]) * 100
-    drawdown_pct[~mask] = 0
-
-    return drawdown, drawdown_pct
-
-
-def calculate_monthly_returns(df_trades: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate monthly returns from trade data.
-
-    Args:
-        df_trades: DataFrame with trade records and P&L
-
-    Returns:
-        DataFrame with monthly return statistics
-    """
-    if df_trades.empty or "pnl_usd" not in df_trades.columns:
-        return pd.DataFrame()
-
-    df_trades_copy = df_trades.copy()
-    df_trades_copy.index = pd.to_datetime(df_trades_copy.index)
-
-    # Group by month
-    monthly_pnl = df_trades_copy["pnl_usd"].groupby(
-        df_trades_copy.index.to_period("M")
-    ).sum()
-
-    monthly_stats = pd.DataFrame({
-        "Period": monthly_pnl.index.astype(str),
-        "P&L (USD)": monthly_pnl.values,
-        "Cumulative P&L": monthly_pnl.cumsum().values
-    })
-
-    return monthly_stats
-
-
-def calculate_risk_metrics(
+def _build_daily_equity(
+    df_trades: pd.DataFrame,
     df_prices: pd.DataFrame,
-    commodity_chosen: str,
-    contract_size: float,
-    tons_conversion: Dict[str, float],
-    confidence_levels: List[float] = [0.95, 0.99]
-) -> Dict[str, float]:
-    """
-    Calculate various risk metrics for a commodity position.
+    mtm_trade: dict[str, object] | None,
+) -> pd.Series:
+    """Reindex trade PnL to a daily equity curve over the full price history."""
+    if df_trades.empty or "pnl_usd_cumsum" not in df_trades.columns:
+        return pd.Series(dtype=float)
 
-    Args:
-        df_prices: DataFrame with price history
-        commodity_chosen: Name of the commodity
-        contract_size: Size of one contract
-        tons_conversion: Dictionary of tons conversion factors
-        confidence_levels: List of confidence levels for VaR calculation
+    equity = df_trades["pnl_usd_cumsum"].reindex(df_prices.index, method="ffill").fillna(0.0)
 
-    Returns:
-        Dictionary of risk metrics
-    """
-    if commodity_chosen not in df_prices.columns:
-        return {}
+    if mtm_trade:
+        mtm_date = pd.Timestamp(str(mtm_trade["date"]))
+        if mtm_date in equity.index:
+            equity.loc[mtm_date:] += float(str(mtm_trade["pnl_usd"]))
 
-    prices = df_prices[commodity_chosen]
-    returns = prices.pct_change().dropna()
+    return equity
 
-    # Position value
-    contract_value = contract_size * tons_conversion[commodity_chosen] * prices.iloc[-1]
 
-    metrics = {
-        "Daily Volatility (%)": returns.std() * 100,
-        "Annualized Volatility (%)": returns.std() * np.sqrt(252) * 100,
-        "Contract Value (USD)": contract_value,
-    }
+def _annualised_return(equity: pd.Series) -> float:
+    if len(equity) < 2 or equity.iloc[0] == 0:
+        return 0.0
+    total_return = (equity.iloc[-1] - equity.iloc[0]) / abs(equity.iloc[0])
+    years = len(equity) / 252
+    return float((1 + total_return) ** (1 / years) - 1) if years > 0 else 0.0
 
-    # Historical VaR at different confidence levels
-    for conf in confidence_levels:
-        percentile = (1 - conf) * 100
-        var_pct = np.percentile(returns, percentile)
-        var_usd = var_pct * contract_value
-        metrics[f"VaR {int(conf*100)}% (USD)"] = var_usd
 
-    # Conditional VaR (Expected Shortfall)
-    for conf in confidence_levels:
-        percentile = (1 - conf) * 100
-        var_threshold = np.percentile(returns, percentile)
-        cvar = returns[returns <= var_threshold].mean()
-        cvar_usd = cvar * contract_value if not np.isnan(cvar) else np.nan
-        metrics[f"CVaR {int(conf*100)}% (USD)"] = cvar_usd
+def _sharpe(daily_returns: pd.Series, risk_free: float = 0.0) -> float:
+    std = float(daily_returns.std())
+    if std == 0 or daily_returns.empty:
+        return float("nan")
+    excess = daily_returns - risk_free / 252
+    return float(excess.mean() / std * ANNUALISATION_FACTOR)
 
-    return metrics
+
+def _sortino(daily_returns: pd.Series, risk_free: float = 0.0) -> float:
+    downside = daily_returns[daily_returns < 0]
+    downside_std = float(downside.std())
+    if downside_std == 0 or daily_returns.empty:
+        return float("nan")
+    excess = daily_returns.mean() - risk_free / 252
+    return float(excess / downside_std * ANNUALISATION_FACTOR)
+
+
+def _calmar(annualised_return: float, max_drawdown: float) -> float:
+    if max_drawdown == 0:
+        return float("inf")
+    return round(annualised_return / (max_drawdown / 1e6), 4)  # normalise
+
+
+def _mean_duration(df_trades: pd.DataFrame) -> float:
+    """Return mean holding period in days between consecutive buy→sell pairs."""
+    if df_trades.empty or len(df_trades) < 2:
+        return float("nan")
+    diffs = df_trades.index.to_series().diff().dropna()
+    mean_td = diffs.mean()
+    return float(mean_td.days) if hasattr(mean_td, "days") else float("nan")
