@@ -11,7 +11,6 @@ This module provides comprehensive trading performance analytics including:
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -111,7 +110,6 @@ def calculate_comprehensive_metrics(
         return _empty_metrics()
 
     # Separate buy and sell trades
-    buys = df_trades[df_trades["position"] == "buy"]
     sells = df_trades[df_trades["position"] == "sell"]
 
     # P&L series (from sell trades only, where P&L is recorded)
@@ -261,7 +259,7 @@ def _empty_metrics() -> PerformanceMetrics:
     )
 
 
-def _calculate_drawdown_stats(cum_pnl: pd.Series, initial_capital: float) -> Dict:
+def _calculate_drawdown_stats(cum_pnl: pd.Series, initial_capital: float) -> dict:
     """Calculate drawdown statistics."""
     if cum_pnl.empty:
         return {"max_drawdown": 0.0, "max_drawdown_pct": 0.0, "max_drawdown_duration": 0, "avg_drawdown": 0.0}
@@ -320,7 +318,7 @@ def _calculate_daily_returns(
     return returns
 
 
-def _calculate_risk_adjusted_returns(daily_returns: pd.Series, risk_free_rate: float) -> Dict:
+def _calculate_risk_adjusted_returns(daily_returns: pd.Series, risk_free_rate: float) -> dict:
     """Calculate risk-adjusted return metrics."""
     if daily_returns.empty or len(daily_returns) < 2:
         return {"sharpe": 0.0, "sortino": 0.0, "calmar": 0.0}
@@ -348,7 +346,7 @@ def _calculate_risk_adjusted_returns(daily_returns: pd.Series, risk_free_rate: f
     return {"sharpe": sharpe, "sortino": sortino, "calmar": calmar}
 
 
-def _calculate_holding_periods(df_trades: pd.DataFrame) -> Dict:
+def _calculate_holding_periods(df_trades: pd.DataFrame) -> dict:
     """Calculate holding period statistics."""
     if df_trades.empty or len(df_trades) < 2:
         return {"avg": 0.0, "max": 0.0, "min": 0.0}
@@ -392,7 +390,7 @@ def _calculate_days_in_market(df_trades: pd.DataFrame) -> int:
     return total_days
 
 
-def _calculate_var_cvar(pnl_series: pd.Series, confidence: float = 0.95) -> Tuple[float, float]:
+def _calculate_var_cvar(pnl_series: pd.Series, confidence: float = 0.95) -> tuple[float, float]:
     """Calculate Value at Risk and Conditional VaR."""
     if pnl_series.empty:
         return 0.0, 0.0
@@ -404,7 +402,7 @@ def _calculate_var_cvar(pnl_series: pd.Series, confidence: float = 0.95) -> Tupl
     return abs(var), abs(cvar) if not np.isnan(cvar) else abs(var)
 
 
-def _calculate_streaks(pnl_series: pd.Series) -> Tuple[int, int]:
+def _calculate_streaks(pnl_series: pd.Series) -> tuple[int, int]:
     """Calculate maximum winning and losing streaks."""
     if pnl_series.empty:
         return 0, 0
@@ -413,7 +411,7 @@ def _calculate_streaks(pnl_series: pd.Series) -> Tuple[int, int]:
     losses = (pnl_series < 0).astype(int)
 
     # Calculate streaks
-    def max_streak(series):
+    def max_streak(series: pd.Series) -> int:
         if series.empty:
             return 0
         max_count = 0
@@ -486,7 +484,7 @@ def metrics_to_dataframe(metrics: PerformanceMetrics) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-def _add_metric(data: Dict, category: str, metric: str, value):
+def _add_metric(data: dict, category: str, metric: str, value: object) -> None:
     """Helper to add metric to data dict."""
     data["Category"].append(category)
     data["Metric"].append(metric)
@@ -497,7 +495,7 @@ def run_monte_carlo_simulation(
     df_trades: pd.DataFrame,
     n_simulations: int = 1000,
     initial_capital: float = 100_000.0
-) -> Dict:
+) -> dict:
     """
     Run Monte Carlo simulation on trade sequence.
 
