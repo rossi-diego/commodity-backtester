@@ -17,6 +17,7 @@ class TestTickers:
     def test_no_month_year_in_ticker(self) -> None:
         """Hardcoded month codes (N25, Z24, etc.) must not appear in tickers."""
         import re
+
         month_pattern = re.compile(r"[FGHJKMNQUVXZ]\d{2}")
         for ticker in tickers:
             assert not month_pattern.search(ticker), (
@@ -37,7 +38,10 @@ class TestCommoditiesDict:
     def test_no_month_year_in_display_names(self) -> None:
         """Display names must not contain month-year strings like 'july 25'."""
         import re
-        date_pattern = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{2,4}\b", re.IGNORECASE)
+
+        date_pattern = re.compile(
+            r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{2,4}\b", re.IGNORECASE
+        )
         for ticker, name in commodities_dict.items():
             assert not date_pattern.search(name), (
                 f"Display name '{name}' for ticker '{ticker}' contains a month/year. "

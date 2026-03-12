@@ -116,7 +116,7 @@ class TestBacktest:
         signals = df_trades["position"].tolist()
         for i in range(len(signals) - 1):
             assert signals[i] != signals[i + 1], (
-                f"Consecutive identical signals at indices {i}, {i+1}: {signals[i]}"
+                f"Consecutive identical signals at indices {i}, {i + 1}: {signals[i]}"
             )
 
     def test_trade_prices_match_price_series(

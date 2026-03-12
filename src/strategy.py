@@ -32,17 +32,18 @@ class BacktestError(Exception):
 def get_available_strategies() -> dict[str, str]:
     """Return a mapping of strategy key → human-readable name."""
     return {
-        "ratio":          "Ratio Strategy",
+        "ratio": "Ratio Strategy",
         "mean_reversion": "Mean Reversion (Bollinger Bands)",
-        "momentum":       "Momentum / Trend Following",
-        "breakout":       "Breakout Strategy",
-        "macd":           "MACD Crossover",
+        "momentum": "Momentum / Trend Following",
+        "breakout": "Breakout Strategy",
+        "macd": "MACD Crossover",
     }
 
 
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def backtest(
     backtest_strategy: StrategyType | str,
@@ -99,7 +100,9 @@ def backtest(
     if backtest_strategy == "ratio":
         if not commodity_ratio or commodity_ratio not in df.columns:
             raise BacktestError(f"Ratio commodity '{commodity_ratio}' not found in data.")
-        signals = _ratio_signals(df_range, commodity_chosen, commodity_ratio, tons_conversion, down_entry, up_exit)
+        signals = _ratio_signals(
+            df_range, commodity_chosen, commodity_ratio, tons_conversion, down_entry, up_exit
+        )
         # Annotate full df with ratio for visualisation
         f1 = tons_conversion[commodity_chosen]
         f2 = tons_conversion[commodity_ratio]
@@ -109,7 +112,9 @@ def backtest(
         signals = _bollinger_signals(prices, bb_window, bb_std)
 
     elif backtest_strategy == "momentum":
-        signals = _momentum_signals(prices, fast_ma, slow_ma, rsi_period, rsi_oversold, rsi_overbought)
+        signals = _momentum_signals(
+            prices, fast_ma, slow_ma, rsi_period, rsi_oversold, rsi_overbought
+        )
 
     elif backtest_strategy == "breakout":
         signals = _breakout_signals(prices, lookback_period, breakout_threshold)
@@ -137,6 +142,7 @@ def backtest(
 # Public helpers
 # ---------------------------------------------------------------------------
 
+
 def _compute_ratio(
     df: pd.DataFrame,
     commodity_chosen: str,
@@ -153,6 +159,7 @@ def _compute_ratio(
 # Signal generators (return a Series of +1=buy, -1=sell, 0=hold)
 # ---------------------------------------------------------------------------
 
+
 def _ratio_signals(
     df_range: pd.DataFrame,
     commodity_chosen: str,
@@ -165,17 +172,17 @@ def _ratio_signals(
     f2 = tons_conversion[commodity_ratio]
     ratio = (df_range[commodity_chosen] * f1) / (df_range[commodity_ratio] * f2)
     df_range["ratio"] = ratio
-    buy_signal  = (ratio < down_entry).astype(int)
+    buy_signal = (ratio < down_entry).astype(int)
     sell_signal = (ratio > up_exit).astype(int)
     return buy_signal - sell_signal  # +1 / -1 / 0
 
 
 def _bollinger_signals(prices: pd.Series, window: int, n_std: float) -> pd.Series:
-    ma  = prices.rolling(window).mean()
+    ma = prices.rolling(window).mean()
     std = prices.rolling(window).std()
     lower = ma - n_std * std
     upper = ma + n_std * std
-    buy_signal  = (prices < lower).astype(int)
+    buy_signal = (prices < lower).astype(int)
     sell_signal = (prices > upper).astype(int)
     return buy_signal - sell_signal
 
@@ -190,34 +197,39 @@ def _momentum_signals(
 ) -> pd.Series:
     fast = prices.ewm(span=fast_ma, adjust=False).mean()
     slow = prices.ewm(span=slow_ma, adjust=False).mean()
-    rsi  = _compute_rsi(prices, rsi_period)
+    rsi = _compute_rsi(prices, rsi_period)
 
-    buy_signal  = ((fast > slow) & (rsi < rsi_overbought)).astype(int)
+    buy_signal = ((fast > slow) & (rsi < rsi_overbought)).astype(int)
     sell_signal = ((fast < slow) | (rsi > rsi_overbought)).astype(int)
     return buy_signal - sell_signal
 
 
 def _breakout_signals(prices: pd.Series, lookback: int, threshold: float) -> pd.Series:
     resistance = prices.rolling(lookback).max().shift(1)
-    buy_signal  = (prices > resistance * (1 + threshold)).astype(int)
+    buy_signal = (prices > resistance * (1 + threshold)).astype(int)
     sell_signal = (prices < resistance).astype(int)
     return buy_signal - sell_signal
 
 
 def _macd_signals(prices: pd.Series, fast: int, slow: int, signal: int) -> pd.Series:
-    ema_fast   = prices.ewm(span=fast,   adjust=False).mean()
-    ema_slow   = prices.ewm(span=slow,   adjust=False).mean()
-    macd_line  = ema_fast - ema_slow
+    ema_fast = prices.ewm(span=fast, adjust=False).mean()
+    ema_slow = prices.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
 
-    buy_signal  = ((macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))).astype(int)
-    sell_signal = ((macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))).astype(int)
+    buy_signal = ((macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))).astype(
+        int
+    )
+    sell_signal = ((macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))).astype(
+        int
+    )
     return buy_signal - sell_signal
 
 
 # ---------------------------------------------------------------------------
 # State machine: convert raw signals → trade log
 # ---------------------------------------------------------------------------
+
 
 def _build_trades(
     signals: pd.Series,
@@ -231,18 +243,18 @@ def _build_trades(
     take_profit_pct: float | None,
 ) -> tuple[pd.DataFrame, bool]:
     trade_type: list[str] = []
-    trade_idx:  list[int] = []
-    in_trade   = False
+    trade_idx: list[int] = []
+    in_trade = False
     entry_price = 0.0
 
     for i in range(len(signals)):
         price = float(prices.iloc[i])
-        sig   = int(signals.iloc[i])
+        sig = int(signals.iloc[i])
 
         if sig > 0 and not in_trade:
             trade_type.append("buy")
             trade_idx.append(i)
-            in_trade    = True
+            in_trade = True
             entry_price = price
 
         elif in_trade:
@@ -268,14 +280,14 @@ def _build_trades(
         return empty, False
 
     idx_labels = df_range.index[trade_idx]
-    ratio_col  = df_range.get("ratio", pd.Series(float("nan"), index=df_range.index))
+    ratio_col = df_range.get("ratio", pd.Series(float("nan"), index=df_range.index))
 
     df_trades = pd.DataFrame(
         {
             "trade_price": prices.iloc[np.array(trade_idx)].values,
             "trade_ratio": ratio_col.iloc[np.array(trade_idx)].values,
-            "position":    trade_type,
-            "quantity":    [1 if t == "buy" else -1 for t in trade_type],
+            "position": trade_type,
+            "quantity": [1 if t == "buy" else -1 for t in trade_type],
         },
         index=idx_labels,
     )
@@ -283,9 +295,9 @@ def _build_trades(
 
     # Historical VaR 95% (log-returns)
     log_returns = pd.Series(np.log(prices / prices.shift(1))).dropna()
-    var_pct     = float(np.percentile(log_returns, 5))
-    last_price  = float(prices.iloc[-1])
-    notional    = contract_size * tons_conversion[commodity_chosen] * last_price
+    var_pct = float(np.percentile(log_returns, 5))
+    last_price = float(prices.iloc[-1])
+    notional = contract_size * tons_conversion[commodity_chosen] * last_price
     df_trades["VaR_95"] = round(abs(var_pct) * notional, 2)
 
     return df_trades, position_open
@@ -295,9 +307,10 @@ def _build_trades(
 # RSI helper
 # ---------------------------------------------------------------------------
 
+
 def _compute_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
-    delta  = prices.diff()
-    gain   = delta.clip(lower=0).rolling(period).mean()
-    loss   = (-delta.clip(upper=0)).rolling(period).mean()
-    rs     = gain / loss.replace(0, float("nan"))
+    delta = prices.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0, float("nan"))
     return 100 - (100 / (1 + rs))

@@ -49,8 +49,6 @@ def yahoo_quotes(
     raw.index = pd.to_datetime(raw.index)
     raw.index.name = "date"
 
-    first_available_date: datetime.date | None = (
-        raw.index.min().date() if not raw.empty else None
-    )
+    first_available_date: datetime.date | None = raw.index.min().date() if not raw.empty else None
 
     return raw, first_available_date
