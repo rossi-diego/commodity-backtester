@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 
 try:
     import streamlit as st
+
     _HAS_STREAMLIT = True
 except ImportError:
     st = None
@@ -80,13 +81,15 @@ def create_strategy_comparison_chart(
     for i, (name, df_trades) in enumerate(results.items()):
         if "pnl_usd_cumsum" not in df_trades.columns or df_trades.empty:
             continue
-        fig.add_trace(go.Scatter(
-            x=df_trades.index,
-            y=df_trades["pnl_usd_cumsum"],
-            mode="lines",
-            name=name,
-            line={"color": colours[i % len(colours)]},
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=df_trades.index,
+                y=df_trades["pnl_usd_cumsum"],
+                mode="lines",
+                name=name,
+                line={"color": colours[i % len(colours)]},
+            )
+        )
 
     fig.update_layout(
         title="Strategy Comparison — Cumulative PnL (USD)",
@@ -104,6 +107,7 @@ def create_strategy_comparison_chart(
 # Figure builders
 # ---------------------------------------------------------------------------
 
+
 def _price_chart(
     plot_df: pd.DataFrame,
     df_trades: pd.DataFrame,
@@ -111,39 +115,70 @@ def _price_chart(
     mtm_trade: dict[str, object] | None,
 ) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=plot_df.index, y=plot_df[commodity_chosen],
-        mode="lines", name=f"{commodity_chosen} Price",
-        line={"color": "#1f2937"},
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=plot_df.index,
+            y=plot_df[commodity_chosen],
+            mode="lines",
+            name=f"{commodity_chosen} Price",
+            line={"color": "#1f2937"},
+        )
+    )
 
-    buys  = df_trades[df_trades["position"] == "buy"]
+    buys = df_trades[df_trades["position"] == "buy"]
     sells = df_trades[df_trades["position"] == "sell"]
 
-    fig.add_trace(go.Scatter(
-        x=buys.index, y=buys["trade_price"], mode="markers", name="Buy",
-        marker={"symbol": "triangle-up", "size": 12, "color": "#16a34a",
-                "line": {"color": "white", "width": 1}},
-    ))
-    fig.add_trace(go.Scatter(
-        x=sells.index, y=sells["trade_price"], mode="markers", name="Sell",
-        marker={"symbol": "triangle-down", "size": 12, "color": "#dc2626",
-                "line": {"color": "white", "width": 1}},
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=buys.index,
+            y=buys["trade_price"],
+            mode="markers",
+            name="Buy",
+            marker={
+                "symbol": "triangle-up",
+                "size": 12,
+                "color": "#16a34a",
+                "line": {"color": "white", "width": 1},
+            },
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=sells.index,
+            y=sells["trade_price"],
+            mode="markers",
+            name="Sell",
+            marker={
+                "symbol": "triangle-down",
+                "size": 12,
+                "color": "#dc2626",
+                "line": {"color": "white", "width": 1},
+            },
+        )
+    )
 
     if mtm_trade:
         mtm_ts = pd.Timestamp(str(mtm_trade["date"]))
         if mtm_ts in plot_df.index:
-            fig.add_trace(go.Scatter(
-                x=[mtm_ts], y=[plot_df[commodity_chosen].loc[mtm_ts]],
-                mode="markers", name="Open MTM",
-                marker={"symbol": "circle", "size": 14, "color": "#f59e0b",
-                        "line": {"color": "white", "width": 2}},
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=[mtm_ts],
+                    y=[plot_df[commodity_chosen].loc[mtm_ts]],
+                    mode="markers",
+                    name="Open MTM",
+                    marker={
+                        "symbol": "circle",
+                        "size": 14,
+                        "color": "#f59e0b",
+                        "line": {"color": "white", "width": 2},
+                    },
+                )
+            )
 
     fig.update_layout(
         title="Price & Trade Signals",
-        xaxis_title="Date", yaxis_title=f"{commodity_chosen} (USD)",
+        xaxis_title="Date",
+        yaxis_title=f"{commodity_chosen} (USD)",
         template="plotly_white",
     )
     return fig
@@ -151,17 +186,32 @@ def _price_chart(
 
 def _ratio_chart(plot_df: pd.DataFrame, down_entry: float, up_exit: float) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=plot_df.index, y=plot_df["ratio"],
-        name="Spread Ratio", line={"color": "#7c3aed"},
-    ))
-    fig.add_hline(y=down_entry, line_dash="dash", line_color="#16a34a",
-                  annotation_text="Entry", annotation_position="bottom left")
-    fig.add_hline(y=up_exit,   line_dash="dash", line_color="#dc2626",
-                  annotation_text="Exit", annotation_position="top left")
+    fig.add_trace(
+        go.Scatter(
+            x=plot_df.index,
+            y=plot_df["ratio"],
+            name="Spread Ratio",
+            line={"color": "#7c3aed"},
+        )
+    )
+    fig.add_hline(
+        y=down_entry,
+        line_dash="dash",
+        line_color="#16a34a",
+        annotation_text="Entry",
+        annotation_position="bottom left",
+    )
+    fig.add_hline(
+        y=up_exit,
+        line_dash="dash",
+        line_color="#dc2626",
+        annotation_text="Exit",
+        annotation_position="top left",
+    )
     fig.update_layout(
         title="Ratio Behaviour (metric-ton terms)",
-        xaxis_title="Date", yaxis_title="Ratio",
+        xaxis_title="Date",
+        yaxis_title="Ratio",
         template="plotly_white",
     )
     return fig
@@ -169,21 +219,31 @@ def _ratio_chart(plot_df: pd.DataFrame, down_entry: float, up_exit: float) -> go
 
 def _pnl_chart(df_trades: pd.DataFrame, mtm_trade: dict[str, object] | None) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df_trades.index, y=df_trades["pnl_usd_cumsum"],
-        mode="lines", name="Realised PnL",
-        fill="tozeroy", line={"color": "#2563eb"},
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=df_trades.index,
+            y=df_trades["pnl_usd_cumsum"],
+            mode="lines",
+            name="Realised PnL",
+            fill="tozeroy",
+            line={"color": "#2563eb"},
+        )
+    )
     if mtm_trade:
         mtm_point = float(df_trades["pnl_usd_cumsum"].iloc[-1]) + float(str(mtm_trade["pnl_usd"]))
-        fig.add_trace(go.Scatter(
-            x=[pd.Timestamp(str(mtm_trade["date"]))], y=[mtm_point],
-            mode="markers", name="MTM Adjustment",
-            marker={"color": "#f59e0b", "size": 14, "line": {"color": "white", "width": 2}},
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=[pd.Timestamp(str(mtm_trade["date"]))],
+                y=[mtm_point],
+                mode="markers",
+                name="MTM Adjustment",
+                marker={"color": "#f59e0b", "size": 14, "line": {"color": "white", "width": 2}},
+            )
+        )
     fig.update_layout(
         title="Cumulative PnL (USD)",
-        xaxis_title="Date", yaxis_title="PnL (USD)",
+        xaxis_title="Date",
+        yaxis_title="PnL (USD)",
         template="plotly_white",
     )
     return fig
@@ -192,6 +252,7 @@ def _pnl_chart(df_trades: pd.DataFrame, mtm_trade: dict[str, object] | None) -> 
 # ---------------------------------------------------------------------------
 # Render helpers
 # ---------------------------------------------------------------------------
+
 
 def _streamlit_render(fig: go.Figure) -> None:
     if st is not None:

@@ -29,6 +29,7 @@ class PerformanceMetrics:
     Contains all key performance indicators used by professional traders
     and portfolio managers.
     """
+
     # Basic Statistics
     total_trades: int
     winning_trades: int
@@ -91,7 +92,7 @@ def calculate_comprehensive_metrics(
     df_prices: pd.DataFrame,
     commodity_chosen: str,
     initial_capital: float = 100_000.0,
-    risk_free_rate: float = 0.05
+    risk_free_rate: float = 0.05,
 ) -> PerformanceMetrics:
     """
     Calculate comprehensive performance metrics for a backtest.
@@ -146,11 +147,17 @@ def calculate_comprehensive_metrics(
     largest_losing_trade = abs(pnl_series.min()) if len(pnl_series) > 0 else 0.0
 
     # Drawdown analysis
-    cum_pnl = df_trades["pnl_usd_cumsum"] if "pnl_usd_cumsum" in df_trades.columns else pnl_series.cumsum()
+    cum_pnl = (
+        df_trades["pnl_usd_cumsum"]
+        if "pnl_usd_cumsum" in df_trades.columns
+        else pnl_series.cumsum()
+    )
     drawdown_stats = _calculate_drawdown_stats(cum_pnl, initial_capital)
 
     # Risk-adjusted returns
-    daily_returns = _calculate_daily_returns(df_trades, df_prices, commodity_chosen, initial_capital)
+    daily_returns = _calculate_daily_returns(
+        df_trades, df_prices, commodity_chosen, initial_capital
+    )
     risk_metrics = _calculate_risk_adjusted_returns(daily_returns, risk_free_rate)
 
     # Ratios
@@ -180,7 +187,9 @@ def calculate_comprehensive_metrics(
     total_return = total_pnl / initial_capital
     years = backtest_days / 365.25
     annualized_return = ((1 + total_return) ** (1 / years) - 1) if years > 0 else 0.0
-    annualized_vol = daily_returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR) if len(daily_returns) > 0 else 0.0
+    annualized_vol = (
+        daily_returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR) if len(daily_returns) > 0 else 0.0
+    )
 
     return PerformanceMetrics(
         # Basic Statistics
@@ -188,53 +197,48 @@ def calculate_comprehensive_metrics(
         winning_trades=winning_trades,
         losing_trades=losing_trades,
         win_rate=win_rate,
-
         # P&L Metrics
         total_pnl=total_pnl,
         realized_pnl=realized_pnl,
         unrealized_pnl=unrealized_pnl,
         gross_profit=gross_profit,
         gross_loss=gross_loss,
-
         # Average Trade Metrics
         avg_trade_pnl=avg_trade_pnl,
         avg_winning_trade=avg_winning_trade,
         avg_losing_trade=avg_losing_trade,
         largest_winning_trade=largest_winning_trade,
         largest_losing_trade=largest_losing_trade,
-
         # Risk Metrics
         max_drawdown=drawdown_stats["max_drawdown"],
         max_drawdown_pct=drawdown_stats["max_drawdown_pct"],
         max_drawdown_duration=drawdown_stats["max_drawdown_duration"],
         avg_drawdown=drawdown_stats["avg_drawdown"],
-
         # Risk-Adjusted Returns
         sharpe_ratio=risk_metrics["sharpe"],
         sortino_ratio=risk_metrics["sortino"],
-        calmar_ratio=(annualized_return / drawdown_stats["max_drawdown"] if drawdown_stats["max_drawdown"] > 0 else 0.0),
-
+        calmar_ratio=(
+            annualized_return / drawdown_stats["max_drawdown"]
+            if drawdown_stats["max_drawdown"] > 0
+            else 0.0
+        ),
         # Ratios
         profit_factor=profit_factor,
         payoff_ratio=payoff_ratio,
         expectancy=expectancy,
-
         # Exposure
         total_exposure_time=exposure_time,
         avg_holding_period=holding_stats["avg"],
         max_holding_period=holding_stats["max"],
         min_holding_period=holding_stats["min"],
-
         # Statistical
         skewness=skewness,
         kurtosis=kurtosis,
         var_95=var_95,
         cvar_95=cvar_95,
-
         # Streak Analysis
         max_consecutive_wins=max_wins,
         max_consecutive_losses=max_losses,
-
         # Annualized
         annualized_return=annualized_return,
         annualized_volatility=annualized_vol,
@@ -244,25 +248,54 @@ def calculate_comprehensive_metrics(
 def _empty_metrics() -> PerformanceMetrics:
     """Return empty metrics object."""
     return PerformanceMetrics(
-        total_trades=0, winning_trades=0, losing_trades=0, win_rate=0.0,
-        total_pnl=0.0, realized_pnl=0.0, unrealized_pnl=0.0,
-        gross_profit=0.0, gross_loss=0.0,
-        avg_trade_pnl=0.0, avg_winning_trade=0.0, avg_losing_trade=0.0,
-        largest_winning_trade=0.0, largest_losing_trade=0.0,
-        max_drawdown=0.0, max_drawdown_pct=0.0, max_drawdown_duration=0, avg_drawdown=0.0,
-        sharpe_ratio=0.0, sortino_ratio=0.0, calmar_ratio=0.0,
-        profit_factor=0.0, payoff_ratio=0.0, expectancy=0.0,
-        total_exposure_time=0.0, avg_holding_period=0.0, max_holding_period=0.0, min_holding_period=0.0,
-        skewness=0.0, kurtosis=0.0, var_95=0.0, cvar_95=0.0,
-        max_consecutive_wins=0, max_consecutive_losses=0,
-        annualized_return=0.0, annualized_volatility=0.0,
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        win_rate=0.0,
+        total_pnl=0.0,
+        realized_pnl=0.0,
+        unrealized_pnl=0.0,
+        gross_profit=0.0,
+        gross_loss=0.0,
+        avg_trade_pnl=0.0,
+        avg_winning_trade=0.0,
+        avg_losing_trade=0.0,
+        largest_winning_trade=0.0,
+        largest_losing_trade=0.0,
+        max_drawdown=0.0,
+        max_drawdown_pct=0.0,
+        max_drawdown_duration=0,
+        avg_drawdown=0.0,
+        sharpe_ratio=0.0,
+        sortino_ratio=0.0,
+        calmar_ratio=0.0,
+        profit_factor=0.0,
+        payoff_ratio=0.0,
+        expectancy=0.0,
+        total_exposure_time=0.0,
+        avg_holding_period=0.0,
+        max_holding_period=0.0,
+        min_holding_period=0.0,
+        skewness=0.0,
+        kurtosis=0.0,
+        var_95=0.0,
+        cvar_95=0.0,
+        max_consecutive_wins=0,
+        max_consecutive_losses=0,
+        annualized_return=0.0,
+        annualized_volatility=0.0,
     )
 
 
 def _calculate_drawdown_stats(cum_pnl: pd.Series, initial_capital: float) -> dict:
     """Calculate drawdown statistics."""
     if cum_pnl.empty:
-        return {"max_drawdown": 0.0, "max_drawdown_pct": 0.0, "max_drawdown_duration": 0, "avg_drawdown": 0.0}
+        return {
+            "max_drawdown": 0.0,
+            "max_drawdown_pct": 0.0,
+            "max_drawdown_duration": 0,
+            "avg_drawdown": 0.0,
+        }
 
     # Portfolio value
     portfolio_value = initial_capital + cum_pnl
@@ -300,10 +333,7 @@ def _calculate_drawdown_stats(cum_pnl: pd.Series, initial_capital: float) -> dic
 
 
 def _calculate_daily_returns(
-    df_trades: pd.DataFrame,
-    df_prices: pd.DataFrame,
-    commodity_chosen: str,
-    initial_capital: float
+    df_trades: pd.DataFrame, df_prices: pd.DataFrame, commodity_chosen: str, initial_capital: float
 ) -> pd.Series:
     """Calculate daily portfolio returns."""
     if df_trades.empty or "pnl_usd_cumsum" not in df_trades.columns:
@@ -463,8 +493,18 @@ def metrics_to_dataframe(metrics: PerformanceMetrics) -> pd.DataFrame:
     # Risk-Adjusted Returns
     _add_metric(data, "Risk-Adjusted", "Sharpe Ratio", f"{metrics.sharpe_ratio:.3f}")
     _add_metric(data, "Risk-Adjusted", "Sortino Ratio", f"{metrics.sortino_ratio:.3f}")
-    _add_metric(data, "Risk-Adjusted", "Profit Factor", f"{metrics.profit_factor:.2f}" if metrics.profit_factor < 100 else "∞")
-    _add_metric(data, "Risk-Adjusted", "Payoff Ratio", f"{metrics.payoff_ratio:.2f}" if metrics.payoff_ratio < 100 else "∞")
+    _add_metric(
+        data,
+        "Risk-Adjusted",
+        "Profit Factor",
+        f"{metrics.profit_factor:.2f}" if metrics.profit_factor < 100 else "∞",
+    )
+    _add_metric(
+        data,
+        "Risk-Adjusted",
+        "Payoff Ratio",
+        f"{metrics.payoff_ratio:.2f}" if metrics.payoff_ratio < 100 else "∞",
+    )
     _add_metric(data, "Risk-Adjusted", "Expectancy", f"${metrics.expectancy:,.2f}")
 
     # Exposure & Timing
@@ -492,9 +532,7 @@ def _add_metric(data: dict, category: str, metric: str, value: object) -> None:
 
 
 def run_monte_carlo_simulation(
-    df_trades: pd.DataFrame,
-    n_simulations: int = 1000,
-    initial_capital: float = 100_000.0
+    df_trades: pd.DataFrame, n_simulations: int = 1000, initial_capital: float = 100_000.0
 ) -> dict:
     """
     Run Monte Carlo simulation on trade sequence.

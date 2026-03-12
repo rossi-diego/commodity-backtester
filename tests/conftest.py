@@ -10,6 +10,7 @@ import pytest
 # Synthetic price data
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def price_df() -> pd.DataFrame:
     """Daily price DataFrame for two synthetic commodities over ~4 years.
@@ -22,11 +23,11 @@ def price_df() -> pd.DataFrame:
     rng = np.random.default_rng(seed=42)
 
     soybean_prices = 500 + 60 * np.sin(np.linspace(0, 8 * np.pi, len(dates)))
-    corn_prices    = 400 + 40 * np.sin(np.linspace(np.pi / 4, 8 * np.pi + np.pi / 4, len(dates)))
+    corn_prices = 400 + 40 * np.sin(np.linspace(np.pi / 4, 8 * np.pi + np.pi / 4, len(dates)))
 
     # Add small noise so prices aren't perfectly sinusoidal
     soybean_prices += rng.normal(0, 2, len(dates))
-    corn_prices    += rng.normal(0, 1, len(dates))
+    corn_prices += rng.normal(0, 1, len(dates))
 
     df = pd.DataFrame(
         {"Soybean": soybean_prices, "Corn": corn_prices},

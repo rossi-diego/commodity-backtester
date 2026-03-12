@@ -14,6 +14,7 @@ ANNUALISATION_FACTOR = np.sqrt(252)
 # PnL engine
 # ---------------------------------------------------------------------------
 
+
 def pnl_trades(
     df_trades: pd.DataFrame,
     df_prices: pd.DataFrame,
@@ -45,13 +46,13 @@ def pnl_trades(
     df_trades["pnl_usd"] = 0.0
 
     for i in range(0, len(df_trades) - 1, 2):
-        buy_row  = df_trades.iloc[i]
+        buy_row = df_trades.iloc[i]
         sell_row = df_trades.iloc[i + 1]
 
-        buy_price  = float(buy_row["trade_price"])  * (1 + slip)
+        buy_price = float(buy_row["trade_price"]) * (1 + slip)
         sell_price = float(sell_row["trade_price"]) * (1 - slip)
 
-        buy_mt  = buy_price  * tons_conversion[commodity_chosen]
+        buy_mt = buy_price * tons_conversion[commodity_chosen]
         sell_mt = sell_price * tons_conversion[commodity_chosen]
 
         pnl = (sell_mt - buy_mt) * contract_tons - 2 * commission_per_trade
@@ -61,14 +62,11 @@ def pnl_trades(
 
     # Mark-to-market for unclosed long
     if position_open and not df_trades.empty and df_trades.iloc[-1]["position"] == "buy":
-        last_buy   = float(df_trades.iloc[-1]["trade_price"]) * (1 + slip)
+        last_buy = float(df_trades.iloc[-1]["trade_price"]) * (1 + slip)
         last_price = float(df_prices[commodity_chosen].iloc[-1])
-        pnl_mtm = (
-            (last_price - last_buy)
-            * tons_conversion[commodity_chosen]
-            * contract_tons
-            - commission_per_trade
-        )
+        pnl_mtm = (last_price - last_buy) * tons_conversion[
+            commodity_chosen
+        ] * contract_tons - commission_per_trade
         mtm_trade = {"date": df_prices.index[-1], "pnl_usd": round(pnl_mtm, 2)}
 
     return df_trades, mtm_trade
@@ -77,6 +75,7 @@ def pnl_trades(
 # ---------------------------------------------------------------------------
 # Performance metrics — standard
 # ---------------------------------------------------------------------------
+
 
 def backtest_performance(
     df_trades: pd.DataFrame,
@@ -89,8 +88,13 @@ def backtest_performance(
 ) -> pd.DataFrame:
     """Core performance summary (12 metrics)."""
     return _build_metrics(
-        df_trades, df_prices, mtm_trade,
-        contract_size, tons_conversion, commodity_chosen, position_open,
+        df_trades,
+        df_prices,
+        mtm_trade,
+        contract_size,
+        tons_conversion,
+        commodity_chosen,
+        position_open,
         extended=False,
     )
 
@@ -106,8 +110,13 @@ def backtest_performance_extended(
 ) -> pd.DataFrame:
     """Extended performance summary with Sortino, Calmar, Profit Factor, avg win/loss."""
     return _build_metrics(
-        df_trades, df_prices, mtm_trade,
-        contract_size, tons_conversion, commodity_chosen, position_open,
+        df_trades,
+        df_prices,
+        mtm_trade,
+        contract_size,
+        tons_conversion,
+        commodity_chosen,
+        position_open,
         extended=True,
     )
 
@@ -115,6 +124,7 @@ def backtest_performance_extended(
 # ---------------------------------------------------------------------------
 # Descriptive statistics across all spreads
 # ---------------------------------------------------------------------------
+
 
 def strategy_describe(
     df: pd.DataFrame,
@@ -140,6 +150,7 @@ def strategy_describe(
 # Internal builder
 # ---------------------------------------------------------------------------
 
+
 def _build_metrics(
     df_trades: pd.DataFrame,
     df_prices: pd.DataFrame,
@@ -150,16 +161,16 @@ def _build_metrics(
     position_open: bool,
     extended: bool,
 ) -> pd.DataFrame:
-    tons_conv  = tons_conversion or {}
-    com        = commodity_chosen or ""
-    c_size     = contract_size or 0.0
+    tons_conv = tons_conversion or {}
+    com = commodity_chosen or ""
+    c_size = contract_size or 0.0
 
     total_complete = int(len(df_trades) / 2)
-    realized_pnl   = float(df_trades["pnl_usd"].sum())
-    mtm_pnl        = float(str(mtm_trade["pnl_usd"])) if mtm_trade else 0.0
-    total_pnl      = realized_pnl + mtm_pnl
+    realized_pnl = float(df_trades["pnl_usd"].sum())
+    mtm_pnl = float(str(mtm_trade["pnl_usd"])) if mtm_trade else 0.0
+    total_pnl = realized_pnl + mtm_pnl
 
-    wins   = int((df_trades["pnl_usd"] > 0).sum())
+    wins = int((df_trades["pnl_usd"] > 0).sum())
     losses = int((df_trades["pnl_usd"] < 0).sum())
     win_rate = wins / total_complete if total_complete > 0 else 0.0
 
@@ -167,73 +178,85 @@ def _build_metrics(
     cum_arr = np.asarray(cum, dtype=float)
     max_drawdown = float((np.maximum.accumulate(cum_arr) - cum_arr).max()) if len(cum) else 0.0
 
-    daily_equity  = _build_daily_equity(df_trades, df_prices, mtm_trade)
+    daily_equity = _build_daily_equity(df_trades, df_prices, mtm_trade)
     daily_returns = daily_equity.pct_change().dropna()
-    sharpe        = _sharpe(daily_returns)
+    sharpe = _sharpe(daily_returns)
 
     gross_profit = float(df_trades.loc[df_trades["pnl_usd"] > 0, "pnl_usd"].sum())
-    gross_loss   = abs(float(df_trades.loc[df_trades["pnl_usd"] < 0, "pnl_usd"].sum()))
+    gross_loss = abs(float(df_trades.loc[df_trades["pnl_usd"] < 0, "pnl_usd"].sum()))
 
     gross_exposure = 0.0
-    if position_open and com and tons_conv and not df_trades.empty and df_trades.iloc[-1]["position"] == "buy":
+    if (
+        position_open
+        and com
+        and tons_conv
+        and not df_trades.empty
+        and df_trades.iloc[-1]["position"] == "buy"
+    ):
         gross_exposure = c_size * tons_conv[com] * float(df_prices[com].iloc[-1])
 
     var_95 = 0.0
     if gross_exposure and com:
         log_ret = pd.Series(np.log(df_prices[com] / df_prices[com].shift(1))).dropna()
-        var_95  = abs(float(np.percentile(log_ret, 5))) * gross_exposure
+        var_95 = abs(float(np.percentile(log_ret, 5))) * gross_exposure
 
     rows: list[tuple[str, object]] = [
-        ("Total Buys",                   int((df_trades["position"] == "buy").sum())),
-        ("Total Sells",                  int((df_trades["position"] == "sell").sum())),
-        ("Complete Trades",              total_complete),
-        ("Open Positions",               int((df_trades["position"] == "buy").sum()) - int((df_trades["position"] == "sell").sum())),
-        ("Realized Profit (USD)",        realized_pnl),
-        ("MTM Adjustment (USD)",         mtm_pnl),
-        ("Total Profit (USD)",           total_pnl),
-        ("Win Rate (%)",                 win_rate * 100),
-        ("Max Drawdown (USD)",           max_drawdown),
-        ("Sharpe Ratio",                 sharpe),
-        ("Best Trade (USD)",             float(df_trades["pnl_usd"].max())),
-        ("Worst Trade (USD)",            float(df_trades["pnl_usd"].min())),
-        ("Backtest Duration (days)",     int((df_prices.index[-1] - df_prices.index[0]).days) if len(df_prices) > 1 else 0),
-        ("Gross Exposure (USD)",         gross_exposure),
-        ("VaR 95% — Historical (USD)",  var_95),
+        ("Total Buys", int((df_trades["position"] == "buy").sum())),
+        ("Total Sells", int((df_trades["position"] == "sell").sum())),
+        ("Complete Trades", total_complete),
+        (
+            "Open Positions",
+            int((df_trades["position"] == "buy").sum())
+            - int((df_trades["position"] == "sell").sum()),
+        ),
+        ("Realized Profit (USD)", realized_pnl),
+        ("MTM Adjustment (USD)", mtm_pnl),
+        ("Total Profit (USD)", total_pnl),
+        ("Win Rate (%)", win_rate * 100),
+        ("Max Drawdown (USD)", max_drawdown),
+        ("Sharpe Ratio", sharpe),
+        ("Best Trade (USD)", float(df_trades["pnl_usd"].max())),
+        ("Worst Trade (USD)", float(df_trades["pnl_usd"].min())),
+        (
+            "Backtest Duration (days)",
+            int((df_prices.index[-1] - df_prices.index[0]).days) if len(df_prices) > 1 else 0,
+        ),
+        ("Gross Exposure (USD)", gross_exposure),
+        ("VaR 95% — Historical (USD)", var_95),
     ]
 
     if extended:
-        annual_return   = _annualised_return(daily_equity)
-        sortino         = _sortino(daily_returns)
-        calmar          = _calmar(annual_return, max_drawdown)
-        profit_factor   = gross_profit / gross_loss if gross_loss > 0 else float("inf")
-        winning_trades  = df_trades[df_trades["pnl_usd"] > 0]["pnl_usd"]
-        losing_trades   = df_trades[df_trades["pnl_usd"] < 0]["pnl_usd"]
-        avg_win  = float(winning_trades.mean()) if not winning_trades.empty else 0.0
-        avg_loss = float(losing_trades.mean())  if not losing_trades.empty  else 0.0
+        annual_return = _annualised_return(daily_equity)
+        sortino = _sortino(daily_returns)
+        calmar = _calmar(annual_return, max_drawdown)
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+        winning_trades = df_trades[df_trades["pnl_usd"] > 0]["pnl_usd"]
+        losing_trades = df_trades[df_trades["pnl_usd"] < 0]["pnl_usd"]
+        avg_win = float(winning_trades.mean()) if not winning_trades.empty else 0.0
+        avg_loss = float(losing_trades.mean()) if not losing_trades.empty else 0.0
 
         recovery_factor = total_pnl / max_drawdown if max_drawdown > 0 else float("inf")
 
         rows += [
-            ("Sortino Ratio",        sortino),
-            ("Calmar Ratio",         calmar),
-            ("Profit Factor",        profit_factor),
-            ("Recovery Factor",      recovery_factor),
-            ("Winning Trades",       wins),
-            ("Losing Trades",        losses),
-            ("Average Win (USD)",    avg_win),
-            ("Average Loss (USD)",   avg_loss),
+            ("Sortino Ratio", sortino),
+            ("Calmar Ratio", calmar),
+            ("Profit Factor", profit_factor),
+            ("Recovery Factor", recovery_factor),
+            ("Winning Trades", wins),
+            ("Losing Trades", losses),
+            ("Average Win (USD)", avg_win),
+            ("Average Loss (USD)", avg_loss),
         ]
 
     df_out = pd.DataFrame(rows, columns=["Metric", "Value"])
-    df_out["Value"] = df_out["Value"].apply(
-        lambda v: round(v, 4) if isinstance(v, float) else v
-    )
+    df_out["Value"] = df_out["Value"].apply(lambda v: round(v, 4) if isinstance(v, float) else v)
     return df_out
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_daily_equity(
     df_trades: pd.DataFrame,
