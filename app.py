@@ -128,8 +128,8 @@ st.markdown("""
 
 st.markdown("""
 <div class="main-header">
-    <h1 style="margin:0;">📈 Commodity Backtester Pro</h1>
-    <p style="margin:5px 0 0 0; opacity:0.9;">Professional-grade backtesting for commodity trading strategies</p>
+    <h1 style="margin:0;">📈 Commodity Backtester</h1>
+    <p style="margin:5px 0 0 0; opacity:0.9;">Backtest commodity spread strategies using real futures data</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -218,22 +218,11 @@ STRATEGY_INFO = {
         "description": "Trade based on price ratios between two commodities in metric ton terms. Ideal for spread trading.",
         "best_for": "Spread trading, mean-reverting pairs",
         "details": """
-**How it works:** Calculates the price ratio between two related commodities (e.g., Soybean/Corn).
-When the ratio drops below the entry threshold, it signals that the primary commodity is relatively cheap → BUY.
-When the ratio rises above the exit threshold, the primary commodity is relatively expensive → SELL.
+Calculates the metric-ton price ratio between two commodities (e.g., Soybean/Corn). A buy signal triggers when the ratio falls below the entry threshold — indicating the primary commodity is cheap relative to the reference. A sell triggers when the ratio recovers above the exit threshold.
 
-**Key parameters:**
-- Entry Level: Ratio threshold to open a long position (typically mean - 1 std)
-- Exit Level: Ratio threshold to close the position (typically mean + 1 std)
+The entry and exit levels are auto-populated from historical mean ± 1 std dev, but can be adjusted manually. The ratio is normalised to USD/metric ton using CME/CBOT contract specs, so cross-commodity comparisons are economically meaningful regardless of the native quoting unit.
 
-**When to use:**
-- Commodities with historical price correlation (e.g., grains, soy complex)
-- Markets showing mean-reverting behavior in relative prices
-- Hedging one commodity exposure against another
-
-**Risk considerations:**
-- Correlation breakdown during market stress
-- Structural shifts in supply/demand can change the equilibrium ratio
+Works best with commodity pairs that share a structural relationship (grains, soy complex). Main risk is a regime shift in the equilibrium ratio due to a supply/demand change.
         """
     },
     "mean_reversion": {
@@ -242,23 +231,9 @@ When the ratio rises above the exit threshold, the primary commodity is relative
         "description": "Uses Bollinger Bands to identify overbought/oversold conditions. Buys at lower band, sells at upper band.",
         "best_for": "Range-bound markets, sideways trends",
         "details": """
-**How it works:** Bollinger Bands create a price envelope using a moving average ± N standard deviations.
-When price touches the lower band, the commodity is oversold → BUY.
-When price touches the upper band, it's overbought → SELL.
+Builds a Bollinger Band envelope around a rolling mean (default 20-day, ±2 std devs). A buy triggers when price closes below the lower band; a sell when it closes above the upper band.
 
-**Key parameters:**
-- Window Period: Number of days for the moving average (default: 20)
-- Standard Deviations: Band width multiplier (default: 2.0)
-
-**When to use:**
-- Sideways or range-bound markets without strong trends
-- Commodities trading within established support/resistance levels
-- Markets with consistent volatility patterns
-
-**Risk considerations:**
-- Trend breakouts can cause significant losses if price continues beyond bands
-- Works poorly in strongly trending markets
-- May generate many small losses before capturing mean reversion
+The window and std dev parameters let you widen or narrow the bands — a wider band generates fewer but higher-conviction signals. This strategy performs well in range-bound markets and tends to underperform during sustained trends, where prices can walk along the bands for extended periods.
         """
     },
     "momentum": {
@@ -267,25 +242,9 @@ When price touches the upper band, it's overbought → SELL.
         "description": "Combines Moving Average crossover with RSI filter to follow established trends.",
         "best_for": "Trending markets, directional moves",
         "details": """
-**How it works:** Uses dual moving average crossover confirmed by RSI momentum.
-BUY when fast MA crosses above slow MA AND RSI is not overbought.
-SELL when fast MA crosses below slow MA OR RSI becomes overbought.
+Combines a dual EMA crossover with an RSI filter. Buys when the fast MA crosses above the slow MA and RSI is below the overbought threshold; exits when the fast MA drops back below the slow MA or RSI becomes overbought.
 
-**Key parameters:**
-- Fast MA Period: Short-term trend indicator (default: 10 days)
-- Slow MA Period: Long-term trend indicator (default: 30 days)
-- RSI Period: Momentum calculation window (default: 14)
-- RSI Thresholds: Overbought (70) and Oversold (30) levels
-
-**When to use:**
-- Commodities in clear uptrends or downtrends
-- Markets with sustained directional moves
-- After consolidation periods that may lead to breakouts
-
-**Risk considerations:**
-- Whipsaw signals in choppy, directionless markets
-- Late entries/exits due to MA lag
-- RSI can stay overbought/oversold for extended periods in strong trends
+The RSI filter helps avoid chasing late-stage moves. The main cost is MA lag — entries and exits happen after the move has started. In choppy, directionless markets this generates frequent whipsaws, so it's best applied to commodities with clear seasonal or trend tendencies.
         """
     },
     "breakout": {
@@ -294,24 +253,9 @@ SELL when fast MA crosses below slow MA OR RSI becomes overbought.
         "description": "Enters on resistance breakout with trailing stop. Captures large directional moves.",
         "best_for": "Volatile markets, breakout patterns",
         "details": """
-**How it works:** Identifies price channels using recent highs/lows.
-BUY when price breaks above recent resistance by a threshold percentage.
-Exits using trailing stops or when price falls back into the range.
+Tracks the rolling N-day high (resistance level). A buy fires when price closes above that resistance by at least the threshold percentage — the extra buffer reduces false breakouts where price briefly pokes through then reverses. A sell fires when price falls back below resistance.
 
-**Key parameters:**
-- Lookback Period: Days to calculate support/resistance (default: 20)
-- Breakout Threshold: Required % above resistance to confirm breakout (default: 2%)
-
-**When to use:**
-- After consolidation periods with narrowing price ranges
-- Markets showing increased volatility or volume
-- Ahead of known catalysts (reports, seasonal patterns)
-
-**Risk considerations:**
-- False breakouts (price briefly breaks out then reverses)
-- Requires quick reaction time
-- Can be expensive if many false signals occur
-- Works best with volume confirmation (not implemented)
+The lookback period controls how significant the resistance level is (longer = stronger level). The breakout threshold adds confirmation but delays entry. Note that this implementation does not use volume confirmation, which would normally strengthen the signal quality.
         """
     },
     "macd": {
@@ -320,25 +264,9 @@ Exits using trailing stops or when price falls back into the range.
         "description": "Uses MACD line crossovers with signal line. Classic momentum indicator with built-in trend detection.",
         "best_for": "Trending markets, momentum trading",
         "details": """
-**How it works:** MACD (Moving Average Convergence Divergence) measures trend momentum.
-BUY when MACD line crosses above the signal line (bullish crossover).
-SELL when MACD line crosses below the signal line (bearish crossover).
+MACD measures the difference between two EMAs (fast and slow). The signal line is an EMA of the MACD itself. A buy fires on a bullish crossover (MACD crosses above signal); a sell on a bearish crossover.
 
-**Key parameters:**
-- Fast Period: EMA for quick price response (default: 12)
-- Slow Period: EMA for underlying trend (default: 26)
-- Signal Period: Smoothing for the signal line (default: 9)
-
-**When to use:**
-- Trending markets with clear directional bias
-- Identifying trend reversals and momentum shifts
-- Confirming price breakouts with momentum
-
-**Risk considerations:**
-- Lagging indicator - signals come after price moves
-- Generates whipsaw signals in sideways markets
-- Best used with other confirmation indicators
-- MACD histogram divergence can provide early warnings
+The default 12/26/9 setting is widely used in commodity markets. Shorter periods generate more signals with more noise; longer periods give cleaner signals but with more lag. Like all trend-following indicators, it struggles in sideways markets where crossovers become frequent and unprofitable.
         """
     }
 }
@@ -1023,7 +951,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center; color: #666; font-size: 0.9em; padding: 20px;'>
-        <strong>Commodity Backtester Pro v2.0.0</strong> | Developed by Diego Rossi |
+        <strong>Commodity Backtester</strong> | Developed by Diego Rossi |
         <a href='https://github.com/rossi-diego/commodity-backtester' target='_blank'>GitHub</a>
         <br><br>
         <span style='font-size: 0.8em;'>
