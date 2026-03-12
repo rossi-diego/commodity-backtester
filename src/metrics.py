@@ -212,7 +212,7 @@ def calculate_comprehensive_metrics(
         # Risk-Adjusted Returns
         sharpe_ratio=risk_metrics["sharpe"],
         sortino_ratio=risk_metrics["sortino"],
-        calmar_ratio=risk_metrics["calmar"],
+        calmar_ratio=(annualized_return / drawdown_stats["max_drawdown"] if drawdown_stats["max_drawdown"] > 0 else 0.0),
 
         # Ratios
         profit_factor=profit_factor,
