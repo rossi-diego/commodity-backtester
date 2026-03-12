@@ -89,7 +89,7 @@ def backtest(
     if commodity_chosen not in df.columns:
         raise BacktestError(f"Commodity '{commodity_chosen}' not found in price data.")
 
-    df_range = df.loc[str(start_date) : str(end_date)].copy()
+    df_range = df.loc[str(start_date) : str(end_date)].copy()  # type: ignore[misc]
 
     if df_range.empty:
         raise BacktestError(f"No price data between {start_date} and {end_date}.")
@@ -272,8 +272,8 @@ def _build_trades(
 
     df_trades = pd.DataFrame(
         {
-            "trade_price": prices.iloc[trade_idx].values,
-            "trade_ratio": ratio_col.iloc[trade_idx].values,
+            "trade_price": prices.iloc[np.array(trade_idx)].values,
+            "trade_ratio": ratio_col.iloc[np.array(trade_idx)].values,
             "position":    trade_type,
             "quantity":    [1 if t == "buy" else -1 for t in trade_type],
         },
@@ -282,7 +282,7 @@ def _build_trades(
     df_trades.index.name = "date"
 
     # Historical VaR 95% (log-returns)
-    log_returns = np.log(prices / prices.shift(1)).dropna()
+    log_returns = pd.Series(np.log(prices / prices.shift(1))).dropna()
     var_pct     = float(np.percentile(log_returns, 5))
     last_price  = float(prices.iloc[-1])
     notional    = contract_size * tons_conversion[commodity_chosen] * last_price

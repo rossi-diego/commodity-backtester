@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from src.strategy import backtest
 from src.utils import backtest_performance, backtest_performance_extended, pnl_trades
-
 
 # ---------------------------------------------------------------------------
 # Helpers

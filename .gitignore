@@ -46,6 +46,13 @@ results/
 # ── Package manager lock files ─────────────────────────────────────────────────
 uv.lock
 
+# ── Editor / workspace files ───────────────────────────────────────────────────
+*.code-workspace
+BACKLOG.md
+
+# ── Generated notebook output ──────────────────────────────────────────────────
+notebooks/iframe_figures/
+
 # ── OS ─────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
