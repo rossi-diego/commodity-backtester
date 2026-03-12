@@ -12,6 +12,7 @@ from src.utils import backtest_performance, backtest_performance_extended, pnl_t
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _run_full(
     price_df: pd.DataFrame,
     tons_conv: dict[str, float],
@@ -85,7 +86,9 @@ class TestPnlTrades:
         if df_trades.empty:
             pytest.skip("No trades generated.")
         expected_cumsum = df_trades["pnl_usd"].cumsum()
-        pd.testing.assert_series_equal(df_trades["pnl_usd_cumsum"], expected_cumsum, check_names=False)
+        pd.testing.assert_series_equal(
+            df_trades["pnl_usd_cumsum"], expected_cumsum, check_names=False
+        )
 
     def test_buy_rows_have_zero_pnl(
         self,
@@ -104,7 +107,9 @@ class TestPnlTrades:
         """Verify PnL formula against manually computed expected value."""
         dates = pd.date_range("2022-01-03", periods=4, freq="B")
         # Prices: buy at 480, sell at 520 for Soybean
-        price_df = pd.DataFrame({"Soybean": [480.0, 490.0, 510.0, 520.0], "Corn": 400.0}, index=dates)
+        price_df = pd.DataFrame(
+            {"Soybean": [480.0, 490.0, 510.0, 520.0], "Corn": 400.0}, index=dates
+        )
         price_df.index.name = "date"
 
         df_trades_raw = pd.DataFrame(
