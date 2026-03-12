@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.strategy import _compute_ratio, backtest
+from src.strategy import BacktestError, _compute_ratio, backtest
 
 
 class TestComputeRatio:
@@ -169,9 +169,9 @@ class TestBacktest:
         tons_conv: dict[str, float],
         contract_sz: float,
     ) -> None:
-        with pytest.raises(ValueError, match="Unknown strategy"):
+        with pytest.raises(BacktestError, match="Unknown strategy"):
             backtest(
-                backtest_strategy="momentum",
+                backtest_strategy="invalid_strategy",
                 start_date=price_df.index[0],
                 end_date=price_df.index[-1],
                 df=price_df.copy(),
@@ -183,22 +183,24 @@ class TestBacktest:
                 contract_size=contract_sz,
             )
 
-    def test_mean_reversion_raises_not_implemented(
+    def test_mean_reversion_returns_trades(
         self,
         price_df: pd.DataFrame,
         tons_conv: dict[str, float],
         contract_sz: float,
     ) -> None:
-        with pytest.raises(NotImplementedError):
-            backtest(
-                backtest_strategy="mean_reversion",
-                start_date=price_df.index[0],
-                end_date=price_df.index[-1],
-                df=price_df.copy(),
-                up_exit=1.25,
-                down_entry=1.10,
-                commodity_chosen="Soybean",
-                commodity_ratio="Corn",
-                tons_conversion=tons_conv,
-                contract_size=contract_sz,
-            )
+        """Mean reversion (Bollinger Bands) is fully implemented and must return a valid trade log."""
+        df_trades, pos_open = backtest(
+            backtest_strategy="mean_reversion",
+            start_date=price_df.index[0],
+            end_date=price_df.index[-1],
+            df=price_df.copy(),
+            up_exit=1.25,
+            down_entry=1.10,
+            commodity_chosen="Soybean",
+            commodity_ratio="Corn",
+            tons_conversion=tons_conv,
+            contract_size=contract_sz,
+        )
+        assert isinstance(df_trades, pd.DataFrame)
+        assert isinstance(pos_open, bool)

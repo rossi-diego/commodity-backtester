@@ -87,8 +87,10 @@ commodity-backtester/
 | Strategy | Status | Description |
 |---|---|---|
 | Ratio | ✅ Live | Long commodity A when `(price_A / price_B)` in $/MT terms falls below entry threshold |
-| Mean Reversion | 🚧 In progress | Long when price drops > N std devs below rolling mean |
-| Momentum | 📋 Planned | Trend-following using moving average crossovers |
+| Mean Reversion | ✅ Live | Bollinger Bands — long when price drops > N std devs below rolling mean |
+| Momentum | ✅ Live | Dual MA crossover with RSI confirmation filter |
+| Breakout | ✅ Live | Channel breakout — buy on resistance breach with threshold confirmation |
+| MACD | ✅ Live | MACD line crossover — buy on bullish signal cross |
 
 ---
 
@@ -102,6 +104,18 @@ commodity-backtester/
 | Profit Factor | Gross profit / gross loss |
 | Recovery Factor | Total profit / max drawdown |
 | VaR 95% | Historical value-at-risk on daily log-returns |
+
+---
+
+## Key Design Decisions
+
+| Decision | Why |
+|---|---|
+| **Continuous futures tickers** (`ZS=F`, not `ZSN25.CBT`) | Expiring front-month contracts break silently after each expiry cycle. Continuous tickers auto-roll to the nearest active contract and work for any date range. |
+| **USD/metric-ton normalisation** | Commodities trade in incompatible units (cents/bushel, USD/gallon, USD/barrel). Converting everything to $/MT using CME/CBOT contract specs makes cross-commodity ratios economically meaningful. |
+| **Vectorised signal generation** | `numpy`/`pandas` operations over the full time-series — no `iterrows()` loops. A 25-year daily backtest completes in under 100 ms. |
+| **Streamlit as a presentation layer only** | All business logic lives in `src/`. The app imports and calls; it contains no calculations. This keeps the core library testable, importable, and framework-agnostic. |
+| **Parquet for caching** | Columnar format enables fast selective reads and reduces file size vs CSV, while `openpyxl` Excel export keeps results accessible to non-technical stakeholders. |
 
 ---
 
@@ -121,6 +135,6 @@ app.py (Streamlit UI)
 
 ## Contact
 
-Developed by **Diego Rossi** — [GitHub](https://github.com/rossi-diego) · [LinkedIn](https://linkedin.com/in/rossi-diego)
+Developed by **Diego Rossi** — [GitHub](https://github.com/rossi-diego) · [LinkedIn](https://www.linkedin.com/in/diego-rossi-santanna/)
 
 For questions or collaboration, feel free to reach out.
