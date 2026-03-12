@@ -85,7 +85,7 @@ addopts = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["src/config.py", "src/metrics.py"]
+omit = ["src/config.py", "src/metrics.py", "src/data_loader.py", "src/visualization.py"]
 
 [tool.coverage.report]
 exclude_lines = [

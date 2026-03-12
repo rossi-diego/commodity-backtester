@@ -210,10 +210,13 @@ def _build_metrics(
         avg_win  = float(winning_trades.mean()) if not winning_trades.empty else 0.0
         avg_loss = float(losing_trades.mean())  if not losing_trades.empty  else 0.0
 
+        recovery_factor = total_pnl / max_drawdown if max_drawdown > 0 else float("inf")
+
         rows += [
             ("Sortino Ratio",        sortino),
             ("Calmar Ratio",         calmar),
             ("Profit Factor",        profit_factor),
+            ("Recovery Factor",      recovery_factor),
             ("Winning Trades",       wins),
             ("Losing Trades",        losses),
             ("Average Win (USD)",    avg_win),
@@ -238,7 +241,7 @@ def _build_daily_equity(
 ) -> pd.Series:
     if df_trades.empty or "pnl_usd_cumsum" not in df_trades.columns:
         return pd.Series(dtype=float)
-    equity = df_trades["pnl_usd_cumsum"].reindex(df_prices.index, method="ffill").fillna(0.0)
+    equity = df_trades["pnl_usd_cumsum"].reindex(df_prices.index).ffill().fillna(0.0)
     if mtm_trade:
         mtm_ts = pd.Timestamp(str(mtm_trade["date"]))
         if mtm_ts in equity.index:
@@ -271,4 +274,4 @@ def _sortino(daily_returns: pd.Series) -> float:
 def _calmar(annualised_return: float, max_drawdown: float) -> float:
     if max_drawdown == 0:
         return float("inf")
-    return round(annualised_return / (max_drawdown / max(1.0, abs(annualised_return))), 4)
+    return round(annualised_return / max_drawdown, 4)

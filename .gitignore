@@ -43,6 +43,9 @@ data/*.parquet
 data/*.xlsx
 results/
 
+# ── Package manager lock files ─────────────────────────────────────────────────
+uv.lock
+
 # ── OS ─────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

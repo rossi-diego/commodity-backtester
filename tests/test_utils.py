@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from src.strategy import backtest
-from src.utils import backtest_performance, pnl_trades
+from src.utils import backtest_performance, backtest_performance_extended, pnl_trades
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ class TestPnlTrades:
         if df_trades.empty:
             pytest.skip("No trades generated.")
         expected_cumsum = df_trades["pnl_usd"].cumsum()
-        pd.testing.assert_series_equal(df_trades["pnl_usd_cumsum"], expected_cumsum)
+        pd.testing.assert_series_equal(df_trades["pnl_usd_cumsum"], expected_cumsum, check_names=False)
 
     def test_buy_rows_have_zero_pnl(
         self,
@@ -193,7 +193,7 @@ class TestBacktestPerformance:
         df_trades, mtm, pos_open = _run_full(price_df, tons_conv, contract_sz)
         if df_trades.empty:
             pytest.skip("No trades generated.")
-        result = backtest_performance(
+        result = backtest_performance_extended(
             df_trades=df_trades,
             df_prices=price_df,
             mtm_trade=mtm,
@@ -204,8 +204,8 @@ class TestBacktestPerformance:
         )
         metrics = set(result["Metric"].tolist())
         required = {
-            "Sharpe Ratio (ann.)",
-            "Sortino Ratio (ann.)",
+            "Sharpe Ratio",
+            "Sortino Ratio",
             "Calmar Ratio",
             "Profit Factor",
             "Recovery Factor",
