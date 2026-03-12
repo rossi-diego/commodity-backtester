@@ -156,7 +156,7 @@ def _build_metrics(
 
     total_complete = int(len(df_trades) / 2)
     realized_pnl   = float(df_trades["pnl_usd"].sum())
-    mtm_pnl        = float(mtm_trade["pnl_usd"]) if mtm_trade else 0.0
+    mtm_pnl        = float(str(mtm_trade["pnl_usd"])) if mtm_trade else 0.0
     total_pnl      = realized_pnl + mtm_pnl
 
     wins   = int((df_trades["pnl_usd"] > 0).sum())
@@ -164,7 +164,8 @@ def _build_metrics(
     win_rate = wins / total_complete if total_complete > 0 else 0.0
 
     cum = df_trades["pnl_usd_cumsum"]
-    max_drawdown = float((np.maximum.accumulate(cum.values) - cum.values).max()) if len(cum) else 0.0
+    cum_arr = np.asarray(cum, dtype=float)
+    max_drawdown = float((np.maximum.accumulate(cum_arr) - cum_arr).max()) if len(cum) else 0.0
 
     daily_equity  = _build_daily_equity(df_trades, df_prices, mtm_trade)
     daily_returns = daily_equity.pct_change().dropna()
@@ -179,7 +180,7 @@ def _build_metrics(
 
     var_95 = 0.0
     if gross_exposure and com:
-        log_ret = np.log(df_prices[com] / df_prices[com].shift(1)).dropna()
+        log_ret = pd.Series(np.log(df_prices[com] / df_prices[com].shift(1))).dropna()
         var_95  = abs(float(np.percentile(log_ret, 5))) * gross_exposure
 
     rows: list[tuple[str, object]] = [
