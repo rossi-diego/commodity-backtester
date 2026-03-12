@@ -13,7 +13,7 @@ try:
 
     _HAS_STREAMLIT = True
 except ImportError:
-    st = None
+    st = None  # type: ignore[assignment]
     _HAS_STREAMLIT = False
 
 

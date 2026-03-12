@@ -68,6 +68,10 @@ ignore_missing_imports = true
 module = ["src.metrics"]
 ignore_errors = true   # legacy file; type errors tracked in BACKLOG issue #9
 
+[[tool.mypy.overrides]]
+module = ["src.visualization"]
+warn_unused_ignores = false   # st = None ignore needed when streamlit ships py.typed
+
 # ── Pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]
