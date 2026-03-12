@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![View App](https://img.shields.io/badge/🚀%20Live%20App-Streamlit-ff4b4b?logo=streamlit&logoColor=white)](https://commodity-backtester.streamlit.app/)
 
-An interactive backtesting framework for commodity spread strategies, built with Python and Streamlit. Test historical performance using real futures data, visualise trade signals, and evaluate risk-adjusted returns with institutional-grade metrics.
+An interactive backtesting framework for commodity spread strategies, built with Python and Streamlit. Test historical performance using real futures data, visualise trade signals, and evaluate risk-adjusted returns.
 
 > **Data source:** continuous futures via Yahoo Finance (`ZS=F`, `ZC=F`, `KE=F`, `ZM=F`, `ZL=F`, `HO=F`, `CL=F`) — tickers that auto-roll and never expire.
 
@@ -19,16 +19,6 @@ An interactive backtesting framework for commodity spread strategies, built with
 - **Interactive charts** — price + signal markers, ratio behaviour, cumulative PnL (Plotly)
 - **Vectorised engine** — entire signal generation in numpy/pandas; 20-year daily backtest < 100 ms
 - **Modular architecture** — each concern isolated in its own module; easy to add new strategies
-
----
-
-## Screenshots
-
-> _Run `streamlit run app.py` locally and add a screenshot here._
-
-| Strategy Results | Ratio Chart |
-|---|---|
-| _(screenshot)_ | _(screenshot)_ |
 
 ---
 
@@ -136,5 +126,3 @@ app.py (Streamlit UI)
 ## Contact
 
 Developed by **Diego Rossi** — [GitHub](https://github.com/rossi-diego) · [LinkedIn](https://www.linkedin.com/in/diego-rossi-santanna/)
-
-For questions or collaboration, feel free to reach out.
