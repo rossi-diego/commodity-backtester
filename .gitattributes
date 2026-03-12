@@ -1,0 +1,3 @@
+# Tell GitHub Linguist to exclude non-Python files from language stats
+*.ipynb linguist-documentation=true
+notebooks/iframe_figures/** linguist-vendored=true

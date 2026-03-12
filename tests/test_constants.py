@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.constants import commodities_dict, contract_sizes, tickers, tons_conversion
 
 

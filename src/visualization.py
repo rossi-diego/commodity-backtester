@@ -9,10 +9,10 @@ import pandas as pd
 import plotly.graph_objects as go
 
 try:
-    import streamlit as st  # type: ignore[import-untyped]
+    import streamlit as st
     _HAS_STREAMLIT = True
 except ImportError:
-    st = None  # type: ignore[assignment]
+    st = None
     _HAS_STREAMLIT = False
 
 
@@ -43,7 +43,7 @@ def backtest_charts(
     """
     plot_df = df_prices.copy()
     plot_df.index = pd.to_datetime(plot_df.index)
-    plot_df = plot_df.loc[str(start_date) : str(end_date)]
+    plot_df = plot_df.loc[str(start_date) : str(end_date)]  # type: ignore[misc]
 
     _render = _streamlit_render if (use_streamlit and _HAS_STREAMLIT) else _standalone_render
 
