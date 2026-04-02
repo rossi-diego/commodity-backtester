@@ -16,9 +16,16 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from src.config import TRADING_DAYS_PER_YEAR
+from . import config
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "PerformanceMetrics",
+    "calculate_comprehensive_metrics",
+    "metrics_to_dataframe",
+    "run_monte_carlo_simulation",
+]
 
 
 @dataclass
@@ -92,7 +99,7 @@ def calculate_comprehensive_metrics(
     df_prices: pd.DataFrame,
     commodity_chosen: str,
     initial_capital: float = 100_000.0,
-    risk_free_rate: float = 0.05,
+    risk_free_rate: float | None = None,
 ) -> PerformanceMetrics:
     """
     Calculate comprehensive performance metrics for a backtest.
@@ -107,6 +114,9 @@ def calculate_comprehensive_metrics(
     Returns:
         PerformanceMetrics dataclass with all calculated metrics
     """
+    if risk_free_rate is None:
+        risk_free_rate = config.RISK_FREE_RATE
+
     if df_trades.empty or "pnl_usd" not in df_trades.columns:
         return _empty_metrics()
 
@@ -188,7 +198,9 @@ def calculate_comprehensive_metrics(
     years = backtest_days / 365.25
     annualized_return = ((1 + total_return) ** (1 / years) - 1) if years > 0 else 0.0
     annualized_vol = (
-        daily_returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR) if len(daily_returns) > 0 else 0.0
+        daily_returns.std() * np.sqrt(config.TRADING_DAYS_PER_YEAR)
+        if len(daily_returns) > 0
+        else 0.0
     )
 
     return PerformanceMetrics(
@@ -218,9 +230,9 @@ def calculate_comprehensive_metrics(
         sharpe_ratio=risk_metrics["sharpe"],
         sortino_ratio=risk_metrics["sortino"],
         calmar_ratio=(
-            annualized_return / drawdown_stats["max_drawdown"]
-            if drawdown_stats["max_drawdown"] > 0
-            else 0.0
+            annualized_return / drawdown_stats["max_drawdown_pct"]
+            if drawdown_stats["max_drawdown_pct"] > 0
+            else float("inf")
         ),
         # Ratios
         profit_factor=profit_factor,
@@ -353,19 +365,23 @@ def _calculate_risk_adjusted_returns(daily_returns: pd.Series, risk_free_rate: f
     if daily_returns.empty or len(daily_returns) < 2:
         return {"sharpe": 0.0, "sortino": 0.0, "calmar": 0.0}
 
-    daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+    daily_rf = risk_free_rate / config.TRADING_DAYS_PER_YEAR
     excess_returns = daily_returns - daily_rf
 
     # Sharpe Ratio
     if daily_returns.std() != 0:
-        sharpe = (excess_returns.mean() / daily_returns.std()) * np.sqrt(TRADING_DAYS_PER_YEAR)
+        sharpe = (excess_returns.mean() / daily_returns.std()) * np.sqrt(
+            config.TRADING_DAYS_PER_YEAR
+        )
     else:
         sharpe = 0.0
 
     # Sortino Ratio (uses downside deviation)
     downside_returns = daily_returns[daily_returns < 0]
     if len(downside_returns) > 0 and downside_returns.std() != 0:
-        sortino = (excess_returns.mean() / downside_returns.std()) * np.sqrt(TRADING_DAYS_PER_YEAR)
+        sortino = (excess_returns.mean() / downside_returns.std()) * np.sqrt(
+            config.TRADING_DAYS_PER_YEAR
+        )
     else:
         sortino = 0.0
 
@@ -557,14 +573,14 @@ def run_monte_carlo_simulation(
     if len(pnl_values) == 0:
         return {}
 
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
 
     final_pnls = []
     max_drawdowns = []
 
     for _ in range(n_simulations):
         # Shuffle trade order
-        shuffled_pnl = np.random.permutation(pnl_values)
+        shuffled_pnl = rng.permutation(pnl_values)
 
         # Calculate cumulative P&L
         cum_pnl = np.cumsum(shuffled_pnl)
