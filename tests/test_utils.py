@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -41,6 +42,16 @@ def _run_full(
         position_open=pos_open,
     )
     return df_trades, mtm, pos_open
+
+
+def _initial_capital(price_df: pd.DataFrame, tons_conv: dict, contract_sz: float) -> float:
+    first_price = float(price_df["Soybean"].dropna().iloc[0])
+    return contract_sz * tons_conv["Soybean"] * first_price
+
+
+# ---------------------------------------------------------------------------
+# PnL engine tests
+# ---------------------------------------------------------------------------
 
 
 class TestPnlTrades:
@@ -104,9 +115,18 @@ class TestPnlTrades:
         assert (buy_pnl == 0.0).all()
 
     def test_pnl_calculation_manual(self, tons_conv: dict[str, float], contract_sz: float) -> None:
-        """Verify PnL formula against manually computed expected value."""
+        """Verify PnL formula against CME contract specification.
+
+        Contract: 5 000 bu soybeans.
+        Buy at 480 c/bu, sell at 520 c/bu → price diff = 40 c/bu.
+
+        Correct PnL = 40 c/bu × 5 000 bu ÷ 100 c/$ = $2 000.
+
+        Equivalently in $/MT:
+          pnl = (520 - 480) × tons_conv["Soybean"] × contract_sz
+              = 40 × 0.36744 × 136.08 ≈ $2 000
+        """
         dates = pd.date_range("2022-01-03", periods=4, freq="B")
-        # Prices: buy at 480, sell at 520 for Soybean
         price_df = pd.DataFrame(
             {"Soybean": [480.0, 490.0, 510.0, 520.0], "Corn": 400.0}, index=dates
         )
@@ -133,11 +153,13 @@ class TestPnlTrades:
             position_open=False,
         )
 
-        # Expected: (520 - 480) * 0.36744 * (136.08 * 0.36744)
-        contract_tons = contract_sz * tons_conv["Soybean"]
-        expected_pnl = (520.0 - 480.0) * tons_conv["Soybean"] * contract_tons
+        # CME spec: 5 000 bu × 40 c/bu ÷ 100 = $2 000
+        expected_pnl = (520.0 - 480.0) * tons_conv["Soybean"] * contract_sz
         actual_pnl = float(df_trades.loc[dates[3], "pnl_usd"])
-        assert abs(actual_pnl - expected_pnl) < 0.01
+        assert abs(actual_pnl - expected_pnl) < 0.01, (
+            f"Expected ${expected_pnl:.2f} (CME spec), got ${actual_pnl:.2f}. "
+            "Check that contract_size is used directly, not multiplied by tons_conversion."
+        )
 
     def test_mtm_none_when_no_open_position(
         self,
@@ -163,6 +185,37 @@ class TestPnlTrades:
             assert mtm is not None
             assert "pnl_usd" in mtm
             assert "date" in mtm
+
+    def test_slippage_reduces_pnl(self, tons_conv: dict[str, float], contract_sz: float) -> None:
+        """With slippage the sell price is lower and buy price higher → lower PnL."""
+        dates = pd.date_range("2022-01-03", periods=2, freq="B")
+        price_df = pd.DataFrame({"Soybean": [500.0, 550.0], "Corn": 400.0}, index=dates)
+        price_df.index.name = "date"
+        raw = pd.DataFrame(
+            {
+                "trade_price": [500.0, 550.0],
+                "trade_ratio": [1.1, 1.2],
+                "position": ["buy", "sell"],
+                "quantity": [1, -1],
+                "VaR_95": [0.0, 0.0],
+            },
+            index=dates,
+        )
+        raw.index.name = "date"
+
+        clean, _ = pnl_trades(
+            raw, price_df, "Soybean", tons_conv, contract_sz, False, slippage_pct=0.0
+        )
+        slipped, _ = pnl_trades(
+            raw.copy(), price_df, "Soybean", tons_conv, contract_sz, False, slippage_pct=0.1
+        )
+
+        assert float(slipped.iloc[-1]["pnl_usd"]) < float(clean.iloc[-1]["pnl_usd"])
+
+
+# ---------------------------------------------------------------------------
+# Performance metrics tests
+# ---------------------------------------------------------------------------
 
 
 class TestBacktestPerformance:
@@ -214,6 +267,7 @@ class TestBacktestPerformance:
             "Recovery Factor",
             "Win Rate (%)",
             "Max Drawdown (USD)",
+            "Annualised Return (%)",
         }
         missing = required - metrics
         assert not missing, f"Missing metrics: {missing}"
@@ -259,3 +313,101 @@ class TestBacktestPerformance:
         )
         mdd = float(result.loc[result["Metric"] == "Max Drawdown (USD)", "Value"].iloc[0])
         assert mdd >= 0.0
+
+    def test_sharpe_is_finite(
+        self,
+        price_df: pd.DataFrame,
+        tons_conv: dict[str, float],
+        contract_sz: float,
+    ) -> None:
+        """Sharpe must be a finite float, not NaN or inf.
+
+        Previous bug: equity curve started at 0, making pct_change() return
+        inf on the first trade, corrupting the standard deviation and producing
+        NaN Sharpe.  Fixed by normalising daily PnL by initial_capital instead
+        of using pct_change on the cumulative equity curve.
+        """
+        df_trades, mtm, pos_open = _run_full(price_df, tons_conv, contract_sz)
+        if df_trades.empty:
+            pytest.skip("No trades generated.")
+        ic = _initial_capital(price_df, tons_conv, contract_sz)
+        result = backtest_performance(
+            df_trades=df_trades,
+            df_prices=price_df,
+            mtm_trade=mtm,
+            contract_size=contract_sz,
+            tons_conversion=tons_conv,
+            commodity_chosen="Soybean",
+            position_open=pos_open,
+            initial_capital=ic,
+        )
+        sharpe = float(result.loc[result["Metric"] == "Sharpe Ratio", "Value"].iloc[0])
+        assert np.isfinite(sharpe), f"Sharpe should be finite, got {sharpe}"
+
+    def test_calmar_is_finite_and_nonzero_when_profitable(
+        self,
+        price_df: pd.DataFrame,
+        tons_conv: dict[str, float],
+        contract_sz: float,
+    ) -> None:
+        """Calmar must not be stuck at exactly 0.
+
+        Previous bug: _annualised_return guarded against equity.iloc[0] == 0
+        (which was always true because the equity curve is cumulative PnL
+        starting at 0), making it always return 0.0 and Calmar always 0.
+        Fixed by using initial_capital as the denominator instead.
+        """
+        df_trades, mtm, pos_open = _run_full(price_df, tons_conv, contract_sz)
+        if df_trades.empty:
+            pytest.skip("No trades generated.")
+        ic = _initial_capital(price_df, tons_conv, contract_sz)
+        result = backtest_performance_extended(
+            df_trades=df_trades,
+            df_prices=price_df,
+            mtm_trade=mtm,
+            contract_size=contract_sz,
+            tons_conversion=tons_conv,
+            commodity_chosen="Soybean",
+            position_open=pos_open,
+            initial_capital=ic,
+        )
+        calmar = float(result.loc[result["Metric"] == "Calmar Ratio", "Value"].iloc[0])
+        # Calmar should be finite (may be inf when drawdown == 0, which is valid)
+        total_pnl = float(result.loc[result["Metric"] == "Total Profit (USD)", "Value"].iloc[0])
+        if total_pnl > 0:
+            # If strategy is profitable, Calmar must be a positive finite number
+            # or inf (zero drawdown).
+            assert calmar > 0 or not np.isfinite(calmar), (
+                f"Calmar should be positive when profitable, got {calmar}"
+            )
+
+    def test_sortino_is_not_nan(
+        self,
+        price_df: pd.DataFrame,
+        tons_conv: dict[str, float],
+        contract_sz: float,
+    ) -> None:
+        """Sortino must never be NaN.
+
+        It may be inf when there are no losing days (mathematically correct),
+        but NaN means the calculation itself is broken.
+        """
+        df_trades, mtm, pos_open = _run_full(price_df, tons_conv, contract_sz)
+        if df_trades.empty:
+            pytest.skip("No trades generated.")
+        ic = _initial_capital(price_df, tons_conv, contract_sz)
+        result = backtest_performance_extended(
+            df_trades=df_trades,
+            df_prices=price_df,
+            mtm_trade=mtm,
+            contract_size=contract_sz,
+            tons_conversion=tons_conv,
+            commodity_chosen="Soybean",
+            position_open=pos_open,
+            initial_capital=ic,
+        )
+        sortino = float(result.loc[result["Metric"] == "Sortino Ratio", "Value"].iloc[0])
+        assert not np.isnan(sortino), (
+            f"Sortino should not be NaN (may be inf for strategies with no losing days), "
+            f"got {sortino}"
+        )
