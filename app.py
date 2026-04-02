@@ -25,11 +25,25 @@ import streamlit as st
 # Ensure src is in path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from src import config
 from src.constants import commodities_dict, contract_sizes, tons_conversion, COMMODITIES
 from src.data_loader import yahoo_quotes, DataLoaderError
 from src.strategy import backtest, BacktestError, StrategyType, get_available_strategies
 from src.utils import pnl_trades, backtest_performance, backtest_performance_extended
 from src.visualization import backtest_charts, create_strategy_comparison_chart
+
+
+# ---------------------------------------------------------------------------
+# Cached data loader — avoids re-downloading on every widget interaction
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_market_data(
+    start_date_str: str, end_date_str: str
+) -> tuple[pd.DataFrame, datetime.date | None]:
+    """Thin wrapper around yahoo_quotes that Streamlit can cache."""
+    return yahoo_quotes(start_date_str, end_date_str)
 
 # =============================================================================
 # Logging Configuration
@@ -369,7 +383,10 @@ with col2:
 if st.button("✅ Load Market Data", type="primary"):
     with st.spinner("📡 Fetching data from Yahoo Finance..."):
         try:
-            df, first_date = yahoo_quotes("2020-01-01", datetime.date.today())
+            df, first_date = _load_market_data(
+                config.DEFAULT_START_DATE,
+                str(datetime.date.today()),
+            )
 
             if df.empty or first_date is None:
                 st.error("❌ No data available for selected commodities.")
@@ -399,22 +416,48 @@ if st.session_state.confirmed_commodities:
     min_date = st.session_state.min_date
     max_date = st.session_state.max_date
 
+    # Quick-select buttons must write into session_state BEFORE the date_input
+    # widgets render; that way the widgets pick up the new value on the same run.
+    st.markdown("**Quick Select:**")
+    quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
+
+    with quick_col1:
+        if st.button("Last Year"):
+            st.session_state["_start_date_val"] = max_date - datetime.timedelta(days=365)
+    with quick_col2:
+        if st.button("Last 2 Years"):
+            st.session_state["_start_date_val"] = max_date - datetime.timedelta(days=730)
+    with quick_col3:
+        if st.button("Last 3 Years"):
+            st.session_state["_start_date_val"] = max_date - datetime.timedelta(days=1095)
+    with quick_col4:
+        if st.button("All Data"):
+            st.session_state["_start_date_val"] = min_date
+
+    # Initialise session_state defaults on first render
+    if "_start_date_val" not in st.session_state:
+        st.session_state["_start_date_val"] = min_date
+    if "_end_date_val" not in st.session_state:
+        st.session_state["_end_date_val"] = max_date
+
     col1, col2, col3 = st.columns([2, 2, 1])
 
     with col1:
         start_date = st.date_input(
             "Start Date",
-            value=min_date,
+            value=st.session_state["_start_date_val"],
             min_value=min_date,
-            max_value=max_date
+            max_value=max_date,
+            key="_start_date_val",
         )
 
     with col2:
         end_date = st.date_input(
             "End Date",
-            value=max_date,
+            value=st.session_state["_end_date_val"],
             min_value=min_date,
-            max_value=max_date
+            max_value=max_date,
+            key="_end_date_val",
         )
 
     with col3:
@@ -423,23 +466,6 @@ if st.session_state.confirmed_commodities:
     if start_date >= end_date:
         st.error("❌ Start date must be before end date.")
         st.stop()
-
-    # Quick date range buttons
-    st.markdown("**Quick Select:**")
-    quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
-
-    with quick_col1:
-        if st.button("Last Year"):
-            start_date = max_date - datetime.timedelta(days=365)
-    with quick_col2:
-        if st.button("Last 2 Years"):
-            start_date = max_date - datetime.timedelta(days=730)
-    with quick_col3:
-        if st.button("Last 3 Years"):
-            start_date = max_date - datetime.timedelta(days=1095)
-    with quick_col4:
-        if st.button("All Data"):
-            start_date = min_date
 
     st.session_state.confirmed_dates = True
     st.session_state.start_date = start_date
@@ -708,6 +734,18 @@ if st.session_state.confirmed_dates:
                     slippage_pct=slippage_pct,
                 )
 
+                # Initial capital = one contract notional at the first price
+                # in the backtest window.  Used to normalise Sharpe, Sortino,
+                # and Calmar so they are dimensionally consistent.
+                first_price = float(
+                    df.loc[str(start_date):, commodity_chosen].dropna().iloc[0]
+                )
+                initial_capital = (
+                    contract_sizes[commodity_chosen]
+                    * tons_conversion[commodity_chosen]
+                    * first_price
+                )
+
                 # Calculate performance metrics
                 if show_advanced_metrics:
                     metrics = backtest_performance_extended(
@@ -717,7 +755,8 @@ if st.session_state.confirmed_dates:
                         contract_size=contract_sizes[commodity_chosen],
                         tons_conversion=tons_conversion,
                         commodity_chosen=commodity_chosen,
-                        position_open=position_open
+                        position_open=position_open,
+                        initial_capital=initial_capital,
                     )
                 else:
                     metrics = backtest_performance(
@@ -727,7 +766,8 @@ if st.session_state.confirmed_dates:
                         contract_size=contract_sizes[commodity_chosen],
                         tons_conversion=tons_conversion,
                         commodity_chosen=commodity_chosen,
-                        position_open=position_open
+                        position_open=position_open,
+                        initial_capital=initial_capital,
                     )
 
                 # Store results in session state
@@ -773,19 +813,29 @@ if st.session_state.confirmed_dates:
                 if show_advanced_metrics:
                     st.markdown("#### 📈 Advanced Metrics")
 
-                    adv_col1, adv_col2, adv_col3, adv_col4 = st.columns(4)
-
-                    # Get extended metrics
                     try:
                         sortino = metrics[metrics["Metric"] == "Sortino Ratio"]["Value"].values[0]
+                        calmar = metrics[metrics["Metric"] == "Calmar Ratio"]["Value"].values[0]
+                        ann_return = metrics[metrics["Metric"] == "Annualised Return (%)"]["Value"].values[0]
                         profit_factor = metrics[metrics["Metric"] == "Profit Factor"]["Value"].values[0]
                         avg_win = metrics[metrics["Metric"] == "Average Win (USD)"]["Value"].values[0]
                         avg_loss = metrics[metrics["Metric"] == "Average Loss (USD)"]["Value"].values[0]
 
+                        adv_col1, adv_col2, adv_col3 = st.columns(3)
                         adv_col1.metric("Sortino Ratio", f"{sortino:.2f}" if pd.notna(sortino) else "N/A")
-                        adv_col2.metric("Profit Factor", f"{profit_factor:.2f}" if pd.notna(profit_factor) else "N/A")
-                        adv_col3.metric("Avg Win", f"${avg_win:,.2f}" if pd.notna(avg_win) else "N/A")
-                        adv_col4.metric("Avg Loss", f"${avg_loss:,.2f}" if pd.notna(avg_loss) else "N/A")
+                        adv_col2.metric(
+                            "Calmar Ratio",
+                            f"{calmar:.2f}" if (pd.notna(calmar) and np.isfinite(calmar)) else ("∞" if pd.notna(calmar) else "N/A"),
+                        )
+                        adv_col3.metric("Annualised Return", f"{ann_return:.2f}%" if pd.notna(ann_return) else "N/A")
+
+                        adv_col4, adv_col5, adv_col6 = st.columns(3)
+                        adv_col4.metric(
+                            "Profit Factor",
+                            f"{profit_factor:.2f}" if (pd.notna(profit_factor) and np.isfinite(profit_factor)) else ("∞" if pd.notna(profit_factor) else "N/A"),
+                        )
+                        adv_col5.metric("Avg Win", f"${avg_win:,.2f}" if pd.notna(avg_win) else "N/A")
+                        adv_col6.metric("Avg Loss", f"${avg_loss:,.2f}" if pd.notna(avg_loss) else "N/A")
                     except (IndexError, KeyError):
                         pass
 
@@ -800,6 +850,78 @@ if st.session_state.confirmed_dates:
                         use_container_width=True,
                         hide_index=True
                     )
+
+                # Deep Analysis — CVaR, skewness/kurtosis, streaks, holding periods,
+                # Monte Carlo simulation (powered by src/metrics.py)
+                if show_advanced_metrics:
+                    with st.expander("🔬 Deep Analysis", expanded=False):
+                        from src.metrics import (
+                            calculate_comprehensive_metrics,
+                            metrics_to_dataframe,
+                            run_monte_carlo_simulation,
+                        )
+                        import plotly.graph_objects as go
+
+                        deep_metrics = calculate_comprehensive_metrics(
+                            df_trades=df_trades_final,
+                            df_prices=df,
+                            commodity_chosen=commodity_chosen,
+                            initial_capital=initial_capital,
+                        )
+                        if deep_metrics.total_trades > 0:
+                            deep_df = metrics_to_dataframe(deep_metrics)
+                            for category, group in deep_df.groupby("Category", sort=False):
+                                st.markdown(f"**{category}**")
+                                st.dataframe(
+                                    group[["Metric", "Value"]].reset_index(drop=True),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+
+                            st.markdown("**Monte Carlo Simulation — 1 000 shuffled trade sequences**")
+                            mc = run_monte_carlo_simulation(
+                                df_trades_final,
+                                n_simulations=1000,
+                                initial_capital=initial_capital,
+                            )
+                            if mc:
+                                fig_mc = go.Figure()
+                                fig_mc.add_trace(
+                                    go.Histogram(
+                                        x=mc["final_pnls"],
+                                        nbinsx=40,
+                                        name="Terminal P&L",
+                                        marker_color="#2d5a87",
+                                        opacity=0.75,
+                                    )
+                                )
+                                fig_mc.add_vline(
+                                    x=mc["final_pnl_5th"],
+                                    line_dash="dash",
+                                    line_color="red",
+                                    annotation_text="5th pct",
+                                )
+                                fig_mc.add_vline(
+                                    x=mc["final_pnl_50th"],
+                                    line_dash="dash",
+                                    line_color="green",
+                                    annotation_text="Median",
+                                )
+                                fig_mc.add_vline(
+                                    x=mc["final_pnl_95th"],
+                                    line_dash="dash",
+                                    line_color="#1e3a5f",
+                                    annotation_text="95th pct",
+                                )
+                                fig_mc.update_layout(
+                                    xaxis_title="Terminal P&L (USD)",
+                                    yaxis_title="Frequency",
+                                    height=350,
+                                    margin=dict(l=40, r=40, t=30, b=40),
+                                )
+                                st.plotly_chart(fig_mc, use_container_width=True)
+                        else:
+                            st.info("Not enough trades for deep analysis.")
 
                 # Charts
                 st.markdown("#### 📈 Interactive Charts")
