@@ -10,6 +10,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+__all__ = [
+    "CommoditySpec",
+    "COMMODITIES",
+    "tickers",
+    "commodities_dict",
+    "contract_sizes",
+    "tons_conversion",
+]
+
 
 @dataclass(frozen=True)
 class CommoditySpec:
