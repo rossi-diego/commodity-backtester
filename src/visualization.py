@@ -17,6 +17,8 @@ except ImportError:
     _HAS_STREAMLIT = False
 
 
+__all__ = ["backtest_charts", "create_strategy_comparison_chart"]
+
 ChartType = Literal["price", "ratio", "pnl"]
 
 
