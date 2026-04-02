@@ -34,14 +34,20 @@ YFINANCE_DESCRIBE: Final[Path] = DATA_DIR / "yfinance_describe.csv"
 # Application Settings
 # =============================================================================
 
-# Default date range for data fetching
-DEFAULT_START_DATE: Final[str] = "2020-01-01"
+# Default date range for data fetching (25-year window gives statistically
+# meaningful drawdown and regime coverage across full commodity cycles)
+DEFAULT_START_DATE: Final[str] = "2000-01-01"
 
 # VaR confidence level
 VAR_CONFIDENCE_LEVEL: Final[float] = 0.95
 
 # Trading days per year (for annualized metrics)
 TRADING_DAYS_PER_YEAR: Final[int] = 252
+
+# Annualised risk-free rate used in Sharpe / Sortino (0.0 = no adjustment).
+# For commodity futures the risk-free component is embedded in the futures basis;
+# set to e.g. 0.04 (4 %) to compute true excess-return Sharpe.
+RISK_FREE_RATE: Final[float] = 0.0
 
 # Logging configuration
 LOG_FORMAT: Final[str] = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

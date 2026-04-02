@@ -7,7 +7,16 @@ from itertools import permutations
 import numpy as np
 import pandas as pd
 
-ANNUALISATION_FACTOR = np.sqrt(252)
+from . import config
+
+__all__ = [
+    "pnl_trades",
+    "backtest_performance",
+    "backtest_performance_extended",
+    "strategy_describe",
+]
+
+ANNUALISATION_FACTOR = np.sqrt(config.TRADING_DAYS_PER_YEAR)
 
 
 # ---------------------------------------------------------------------------
@@ -32,8 +41,19 @@ def pnl_trades(
     commission_per_trade:
         Fixed USD commission charged per trade leg (applied to both buy and sell).
     slippage_pct:
-        Slippage as a percentage of trade price (0.05 = 0.05%).
+        Slippage as a percentage of trade price (0.05 = 0.05 %).
         Buy price is increased by slippage; sell price is decreased.
+
+    Notes
+    -----
+    PnL formula (per round trip)::
+
+        pnl = (sell_price_$/MT − buy_price_$/MT) × contract_size_MT
+              − 2 × commission_per_trade
+
+    where ``price_$/MT = native_price × tons_conversion``.
+    ``contract_size`` is already expressed in metric tons; no further
+    conversion is applied to it.
     """
     df_trades = df_trades.copy()
     mtm_trade: dict[str, object] | None = None
@@ -41,7 +61,7 @@ def pnl_trades(
     if df_trades.empty:
         return df_trades, mtm_trade
 
-    contract_tons = contract_size * tons_conversion[commodity_chosen]
+    f = tons_conversion[commodity_chosen]
     slip = slippage_pct / 100.0
     df_trades["pnl_usd"] = 0.0
 
@@ -49,24 +69,26 @@ def pnl_trades(
         buy_row = df_trades.iloc[i]
         sell_row = df_trades.iloc[i + 1]
 
-        buy_price = float(buy_row["trade_price"]) * (1 + slip)
-        sell_price = float(sell_row["trade_price"]) * (1 - slip)
+        # Adjust fill prices for slippage
+        buy_price_native = float(buy_row["trade_price"]) * (1 + slip)
+        sell_price_native = float(sell_row["trade_price"]) * (1 - slip)
 
-        buy_mt = buy_price * tons_conversion[commodity_chosen]
-        sell_mt = sell_price * tons_conversion[commodity_chosen]
+        # Convert to $/MT
+        buy_mt = buy_price_native * f
+        sell_mt = sell_price_native * f
 
-        pnl = (sell_mt - buy_mt) * contract_tons - 2 * commission_per_trade
+        # PnL = price_diff_$/MT × contract_size_MT − commissions
+        # contract_size is in MT — no further conversion factor needed.
+        pnl = (sell_mt - buy_mt) * contract_size - 2 * commission_per_trade
         df_trades.at[sell_row.name, "pnl_usd"] = round(pnl, 2)
 
     df_trades["pnl_usd_cumsum"] = df_trades["pnl_usd"].cumsum()
 
     # Mark-to-market for unclosed long
     if position_open and not df_trades.empty and df_trades.iloc[-1]["position"] == "buy":
-        last_buy = float(df_trades.iloc[-1]["trade_price"]) * (1 + slip)
-        last_price = float(df_prices[commodity_chosen].iloc[-1])
-        pnl_mtm = (last_price - last_buy) * tons_conversion[
-            commodity_chosen
-        ] * contract_tons - commission_per_trade
+        last_buy_native = float(df_trades.iloc[-1]["trade_price"]) * (1 + slip)
+        last_price_native = float(df_prices[commodity_chosen].iloc[-1])
+        pnl_mtm = (last_price_native - last_buy_native) * f * contract_size - commission_per_trade
         mtm_trade = {"date": df_prices.index[-1], "pnl_usd": round(pnl_mtm, 2)}
 
     return df_trades, mtm_trade
@@ -85,6 +107,7 @@ def backtest_performance(
     tons_conversion: dict[str, float] | None = None,
     commodity_chosen: str | None = None,
     position_open: bool = False,
+    initial_capital: float | None = None,
 ) -> pd.DataFrame:
     """Core performance summary (12 metrics)."""
     return _build_metrics(
@@ -96,6 +119,7 @@ def backtest_performance(
         commodity_chosen,
         position_open,
         extended=False,
+        initial_capital=initial_capital,
     )
 
 
@@ -107,6 +131,7 @@ def backtest_performance_extended(
     tons_conversion: dict[str, float] | None = None,
     commodity_chosen: str | None = None,
     position_open: bool = False,
+    initial_capital: float | None = None,
 ) -> pd.DataFrame:
     """Extended performance summary with Sortino, Calmar, Profit Factor, avg win/loss."""
     return _build_metrics(
@@ -118,6 +143,7 @@ def backtest_performance_extended(
         commodity_chosen,
         position_open,
         extended=True,
+        initial_capital=initial_capital,
     )
 
 
@@ -160,10 +186,24 @@ def _build_metrics(
     commodity_chosen: str | None,
     position_open: bool,
     extended: bool,
+    initial_capital: float | None = None,
 ) -> pd.DataFrame:
     tons_conv = tons_conversion or {}
     com = commodity_chosen or ""
     c_size = contract_size or 0.0
+
+    # ------------------------------------------------------------------
+    # Initial capital — one contract notional at the first price in the
+    # backtest window.  Used to normalise returns so that Sharpe, Sortino,
+    # and Calmar are dimensionally consistent.
+    # ------------------------------------------------------------------
+    if initial_capital is None and com and tons_conv and c_size and not df_prices.empty:
+        first_price = float(df_prices[com].dropna().iloc[0])
+        initial_capital = c_size * tons_conv[com] * first_price
+    # Fallback: if we still can't compute it, use 1 (prevents /0 errors but
+    # the caller should always supply the relevant parameters).
+    if not initial_capital:
+        initial_capital = 1.0
 
     total_complete = int(len(df_trades) / 2)
     realized_pnl = float(df_trades["pnl_usd"].sum())
@@ -174,12 +214,23 @@ def _build_metrics(
     losses = int((df_trades["pnl_usd"] < 0).sum())
     win_rate = wins / total_complete if total_complete > 0 else 0.0
 
+    # ------------------------------------------------------------------
+    # Max drawdown — in USD (for display) and as % of initial capital
+    # (for Calmar).
+    # ------------------------------------------------------------------
     cum = df_trades["pnl_usd_cumsum"]
     cum_arr = np.asarray(cum, dtype=float)
     max_drawdown = float((np.maximum.accumulate(cum_arr) - cum_arr).max()) if len(cum) else 0.0
+    max_drawdown_pct = max_drawdown / initial_capital if initial_capital > 0 else 0.0
 
+    # ------------------------------------------------------------------
+    # Daily returns — normalised by initial capital so they are unitless
+    # fractions suitable for Sharpe / Sortino.
+    # ------------------------------------------------------------------
     daily_equity = _build_daily_equity(df_trades, df_prices, mtm_trade)
-    daily_returns = daily_equity.pct_change().dropna()
+    daily_pnl = daily_equity.diff().fillna(0.0)
+    daily_returns = (daily_pnl / initial_capital).replace([np.inf, -np.inf], np.nan).dropna()
+
     sharpe = _sharpe(daily_returns)
 
     gross_profit = float(df_trades.loc[df_trades["pnl_usd"] > 0, "pnl_usd"].sum())
@@ -198,7 +249,8 @@ def _build_metrics(
     var_95 = 0.0
     if gross_exposure and com:
         log_ret = pd.Series(np.log(df_prices[com] / df_prices[com].shift(1))).dropna()
-        var_95 = abs(float(np.percentile(log_ret, 5))) * gross_exposure
+        var_pct = (1 - config.VAR_CONFIDENCE_LEVEL) * 100
+        var_95 = abs(float(np.percentile(log_ret, var_pct))) * gross_exposure
 
     rows: list[tuple[str, object]] = [
         ("Total Buys", int((df_trades["position"] == "buy").sum())),
@@ -226,18 +278,18 @@ def _build_metrics(
     ]
 
     if extended:
-        annual_return = _annualised_return(daily_equity)
+        annual_return = _annualised_return(daily_equity, initial_capital)
         sortino = _sortino(daily_returns)
-        calmar = _calmar(annual_return, max_drawdown)
+        calmar = _calmar(annual_return, max_drawdown_pct)
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
         winning_trades = df_trades[df_trades["pnl_usd"] > 0]["pnl_usd"]
         losing_trades = df_trades[df_trades["pnl_usd"] < 0]["pnl_usd"]
         avg_win = float(winning_trades.mean()) if not winning_trades.empty else 0.0
         avg_loss = float(losing_trades.mean()) if not losing_trades.empty else 0.0
-
         recovery_factor = total_pnl / max_drawdown if max_drawdown > 0 else float("inf")
 
         rows += [
+            ("Annualised Return (%)", round(annual_return * 100, 4)),
             ("Sortino Ratio", sortino),
             ("Calmar Ratio", calmar),
             ("Profit Factor", profit_factor),
@@ -273,29 +325,65 @@ def _build_daily_equity(
     return equity
 
 
-def _annualised_return(equity: pd.Series) -> float:
-    if len(equity) < 2 or equity.iloc[0] == 0:
+def _annualised_return(equity: pd.Series, initial_capital: float) -> float:
+    """CAGR expressed as a fraction (0.12 = 12 %).
+
+    Uses initial_capital as the denominator so the equity curve's zero-start
+    does not break the calculation.
+    """
+    if len(equity) < 2 or initial_capital <= 0:
         return 0.0
-    total = (equity.iloc[-1] - equity.iloc[0]) / abs(equity.iloc[0])
-    years = len(equity) / 252
-    return float((1 + total) ** (1 / years) - 1) if years > 0 else 0.0
+    total_return = equity.iloc[-1] / initial_capital  # total PnL / initial notional
+    years = len(equity) / config.TRADING_DAYS_PER_YEAR
+    if years <= 0:
+        return 0.0
+    return float((1 + total_return) ** (1 / years) - 1)
 
 
-def _sharpe(daily_returns: pd.Series, risk_free: float = 0.0) -> float:
+def _sharpe(
+    daily_returns: pd.Series,
+    risk_free: float = config.RISK_FREE_RATE,
+) -> float:
+    """Annualised Sharpe ratio.
+
+    daily_returns must be dimensionless (pnl / initial_capital).
+    """
     std = float(daily_returns.std())
     if std == 0 or daily_returns.empty:
         return float("nan")
-    return float((daily_returns.mean() - risk_free / 252) / std * ANNUALISATION_FACTOR)
+    return float(
+        (daily_returns.mean() - risk_free / config.TRADING_DAYS_PER_YEAR)
+        / std
+        * ANNUALISATION_FACTOR
+    )
 
 
-def _sortino(daily_returns: pd.Series) -> float:
-    downside_std = float(daily_returns[daily_returns < 0].std())
-    if downside_std == 0 or daily_returns.empty:
+def _sortino(
+    daily_returns: pd.Series,
+    risk_free: float = config.RISK_FREE_RATE,
+) -> float:
+    """Annualised Sortino ratio (downside deviation of negative returns only).
+
+    daily_returns must be dimensionless (pnl / initial_capital).
+
+    Returns ``inf`` when there are no negative return days (no downside risk),
+    which is the mathematically correct limit.  Returns ``nan`` only when the
+    input series is empty (undefined).
+    """
+    if daily_returns.empty:
         return float("nan")
-    return float(daily_returns.mean() / downside_std * ANNUALISATION_FACTOR)
-
-
-def _calmar(annualised_return: float, max_drawdown: float) -> float:
-    if max_drawdown == 0:
+    downside = daily_returns[daily_returns < 0]
+    if downside.empty:
+        return float("inf")  # no losing days → perfect Sortino
+    downside_std = float(downside.std())
+    if downside_std == 0 or np.isnan(downside_std):
         return float("inf")
-    return round(annualised_return / max_drawdown, 4)
+    excess = daily_returns.mean() - risk_free / config.TRADING_DAYS_PER_YEAR
+    return float(excess / downside_std * ANNUALISATION_FACTOR)
+
+
+def _calmar(annualised_return: float, max_drawdown_pct: float) -> float:
+    """Calmar ratio = annualised return / max drawdown (both dimensionless fractions)."""
+    if max_drawdown_pct <= 0:
+        return float("inf")
+    return round(annualised_return / max_drawdown_pct, 4)

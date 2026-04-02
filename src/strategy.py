@@ -3,11 +3,18 @@ Backtesting engine for commodity trading strategies.
 
 Supported strategies
 --------------------
-``"ratio"``        — spread ratio mean reversion
+``"ratio"``          — spread ratio mean reversion
 ``"mean_reversion"`` — Bollinger Bands
-``"momentum"``     — dual MA crossover + RSI filter
-``"breakout"``     — channel breakout
-``"macd"``         — MACD line crossover
+``"momentum"``       — dual EMA crossover + RSI filter
+``"breakout"``       — channel breakout
+``"macd"``           — MACD line crossover
+
+Execution model
+---------------
+Signals are generated from the **close of day T** and executed at the
+**close of day T+1** (next-bar execution).  This avoids the look-ahead
+bias of same-bar execution, where the closing price that triggers the
+signal is simultaneously used as the fill price.
 """
 
 from __future__ import annotations
@@ -18,11 +25,20 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from . import config
+
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
 
 StrategyType = Literal["ratio", "mean_reversion", "momentum", "breakout", "macd"]
+
+__all__ = [
+    "BacktestError",
+    "StrategyType",
+    "backtest",
+    "get_available_strategies",
+]
 
 
 class BacktestError(Exception):
@@ -83,7 +99,9 @@ def backtest(
     Returns
     -------
     df_trades:
-        Trade log with columns: trade_price, trade_ratio, position, quantity, VaR_95.
+        Trade log with columns: trade_price, trade_ratio, position, quantity,
+        VaR_95.  Trade prices reflect **next-bar (T+1) execution**: the signal
+        fires on day T's close and the fill is recorded at day T+1's close.
     position_open:
         True if the last signal is an unclosed long (open MTM position).
     """
@@ -199,7 +217,9 @@ def _momentum_signals(
     slow = prices.ewm(span=slow_ma, adjust=False).mean()
     rsi = _compute_rsi(prices, rsi_period)
 
-    buy_signal = ((fast > slow) & (rsi < rsi_overbought)).astype(int)
+    # Buy when: fast MA above slow MA, RSI confirms momentum (above oversold)
+    # and is not yet overbought.
+    buy_signal = ((fast > slow) & (rsi > rsi_oversold) & (rsi < rsi_overbought)).astype(int)
     sell_signal = ((fast < slow) | (rsi > rsi_overbought)).astype(int)
     return buy_signal - sell_signal
 
@@ -247,27 +267,30 @@ def _build_trades(
     in_trade = False
     entry_price = 0.0
 
-    for i in range(len(signals)):
-        price = float(prices.iloc[i])
+    # Iterate over signal bars [0 … N-2]; execution is always at the NEXT bar
+    # (T+1 next-close execution — no same-bar look-ahead).
+    for i in range(len(signals) - 1):
         sig = int(signals.iloc[i])
+        exec_price = float(prices.iloc[i + 1])  # fill at next day's close
 
         if sig > 0 and not in_trade:
             trade_type.append("buy")
-            trade_idx.append(i)
+            trade_idx.append(i + 1)
             in_trade = True
-            entry_price = price
+            entry_price = exec_price
 
         elif in_trade:
-            # Stop loss / take profit checks
             forced_exit = False
-            if stop_loss_pct is not None and price <= entry_price * (1 - stop_loss_pct / 100):
+            if stop_loss_pct is not None and exec_price <= entry_price * (1 - stop_loss_pct / 100):
                 forced_exit = True
-            if take_profit_pct is not None and price >= entry_price * (1 + take_profit_pct / 100):
+            if take_profit_pct is not None and exec_price >= entry_price * (
+                1 + take_profit_pct / 100
+            ):
                 forced_exit = True
 
             if forced_exit or sig < 0:
                 trade_type.append("sell")
-                trade_idx.append(i)
+                trade_idx.append(i + 1)
                 in_trade = False
 
     position_open = in_trade
@@ -293,24 +316,36 @@ def _build_trades(
     )
     df_trades.index.name = "date"
 
-    # Historical VaR 95% (log-returns)
+    # Historical VaR 95% — computed per trade using only returns available up
+    # to that trade date (no look-ahead bias).
     log_returns = pd.Series(np.log(prices / prices.shift(1))).dropna()
-    var_pct = float(np.percentile(log_returns, 5))
-    last_price = float(prices.iloc[-1])
-    notional = contract_size * tons_conversion[commodity_chosen] * last_price
-    df_trades["VaR_95"] = round(abs(var_pct) * notional, 2)
+    var_confidence_pct = (1 - config.VAR_CONFIDENCE_LEVEL) * 100  # e.g. 5.0
+    var_list: list[float] = []
+    for trade_date in idx_labels:
+        hist = log_returns.loc[:trade_date]
+        var_pct = abs(float(np.percentile(hist, var_confidence_pct))) if len(hist) >= 20 else 0.0
+        trade_price = float(prices.loc[trade_date])
+        notional = contract_size * trade_price * tons_conversion[commodity_chosen]
+        var_list.append(round(var_pct * notional, 2))
+    df_trades["VaR_95"] = var_list
 
     return df_trades, position_open
 
 
 # ---------------------------------------------------------------------------
-# RSI helper
+# RSI helper — Wilder's exponential smoothing (industry standard)
 # ---------------------------------------------------------------------------
 
 
 def _compute_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
+    """Compute RSI using Wilder's exponential smoothing (alpha = 1/period).
+
+    This matches the implementation used by TA-Lib, Bloomberg, and TradingView.
+    The simple-rolling-average approximation produces materially different
+    values and miscalibrates overbought/oversold thresholds.
+    """
     delta = prices.diff()
-    gain = delta.clip(lower=0).rolling(period).mean()
-    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    gain = delta.clip(lower=0).ewm(com=period - 1, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(com=period - 1, adjust=False).mean()
     rs = gain / loss.replace(0, float("nan"))
     return 100 - (100 / (1 + rs))
