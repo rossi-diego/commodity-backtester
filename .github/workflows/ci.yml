@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install ruff
-        run: pip install ruff>=0.4
+        run: pip install "ruff==0.17.3"  # keep in sync with requirements-dev.txt
 
       - name: Check formatting
         run: ruff format --check src/ tests/
