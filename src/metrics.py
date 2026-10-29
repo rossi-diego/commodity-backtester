@@ -6,7 +6,6 @@ This module provides comprehensive trading performance analytics including:
 - Drawdown analysis
 - Trade statistics
 - Rolling performance
-- Monte Carlo simulation
 """
 
 import logging
@@ -17,6 +16,7 @@ import pandas as pd
 from scipy import stats
 
 from . import config
+from .utils import _build_daily_equity, _sharpe, _sortino
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,6 @@ __all__ = [
     "PerformanceMetrics",
     "calculate_comprehensive_metrics",
     "metrics_to_dataframe",
-    "run_monte_carlo_simulation",
 ]
 
 
@@ -100,6 +99,7 @@ def calculate_comprehensive_metrics(
     commodity_chosen: str,
     initial_capital: float = 100_000.0,
     risk_free_rate: float | None = None,
+    mtm_trade: dict[str, object] | None = None,
 ) -> PerformanceMetrics:
     """
     Calculate comprehensive performance metrics for a backtest.
@@ -110,6 +110,8 @@ def calculate_comprehensive_metrics(
         commodity_chosen: Name of the traded commodity
         initial_capital: Starting capital for return calculations
         risk_free_rate: Annual risk-free rate for Sharpe calculation
+        mtm_trade: Open-position mark-to-market record (same object passed to
+            the headline metrics), so both panels share one daily equity curve
 
     Returns:
         PerformanceMetrics dataclass with all calculated metrics
@@ -165,9 +167,7 @@ def calculate_comprehensive_metrics(
     drawdown_stats = _calculate_drawdown_stats(cum_pnl, initial_capital)
 
     # Risk-adjusted returns
-    daily_returns = _calculate_daily_returns(
-        df_trades, df_prices, commodity_chosen, initial_capital
-    )
+    daily_returns = _calculate_daily_returns(df_trades, df_prices, initial_capital, mtm_trade)
     risk_metrics = _calculate_risk_adjusted_returns(daily_returns, risk_free_rate)
 
     # Ratios
@@ -345,51 +345,34 @@ def _calculate_drawdown_stats(cum_pnl: pd.Series, initial_capital: float) -> dic
 
 
 def _calculate_daily_returns(
-    df_trades: pd.DataFrame, df_prices: pd.DataFrame, commodity_chosen: str, initial_capital: float
+    df_trades: pd.DataFrame,
+    df_prices: pd.DataFrame,
+    initial_capital: float,
+    mtm_trade: dict[str, object] | None = None,
 ) -> pd.Series:
-    """Calculate daily portfolio returns."""
-    if df_trades.empty or "pnl_usd_cumsum" not in df_trades.columns:
+    """Daily returns on the calendar of df_prices, normalised by initial capital.
+
+    Reuses the same daily equity curve as the headline metrics in src/utils.py,
+    so Sharpe/Sortino are identical in every panel. Returns are computed per
+    trading day, not per trade row, which is what the sqrt(252) annualisation
+    assumes.
+    """
+    if df_trades.empty or initial_capital <= 0:
         return pd.Series(dtype=float)
-
-    # Create daily portfolio value series
-    portfolio_value = initial_capital + df_trades["pnl_usd_cumsum"]
-
-    # Calculate returns
-    returns = portfolio_value.pct_change().dropna()
-
-    return returns
+    daily_equity = _build_daily_equity(df_trades, df_prices, mtm_trade)
+    daily_pnl = daily_equity.diff().fillna(0.0)
+    return (daily_pnl / initial_capital).replace([np.inf, -np.inf], np.nan).dropna()
 
 
 def _calculate_risk_adjusted_returns(daily_returns: pd.Series, risk_free_rate: float) -> dict:
-    """Calculate risk-adjusted return metrics."""
+    """Annualised Sharpe and Sortino from daily returns (Calmar is computed by the caller)."""
     if daily_returns.empty or len(daily_returns) < 2:
         return {"sharpe": 0.0, "sortino": 0.0, "calmar": 0.0}
-
-    daily_rf = risk_free_rate / config.TRADING_DAYS_PER_YEAR
-    excess_returns = daily_returns - daily_rf
-
-    # Sharpe Ratio
-    if daily_returns.std() != 0:
-        sharpe = (excess_returns.mean() / daily_returns.std()) * np.sqrt(
-            config.TRADING_DAYS_PER_YEAR
-        )
-    else:
-        sharpe = 0.0
-
-    # Sortino Ratio (uses downside deviation)
-    downside_returns = daily_returns[daily_returns < 0]
-    if len(downside_returns) > 0 and downside_returns.std() != 0:
-        sortino = (excess_returns.mean() / downside_returns.std()) * np.sqrt(
-            config.TRADING_DAYS_PER_YEAR
-        )
-    else:
-        sortino = 0.0
-
-    # Calmar Ratio (annualized return / max drawdown)
-    # Note: requires drawdown from portfolio level
-    calmar = 0.0  # Will be calculated separately
-
-    return {"sharpe": sharpe, "sortino": sortino, "calmar": calmar}
+    return {
+        "sharpe": _sharpe(daily_returns, risk_free_rate),
+        "sortino": _sortino(daily_returns, risk_free_rate),
+        "calmar": 0.0,
+    }
 
 
 def _calculate_holding_periods(df_trades: pd.DataFrame) -> dict:
@@ -545,66 +528,3 @@ def _add_metric(data: dict, category: str, metric: str, value: object) -> None:
     data["Category"].append(category)
     data["Metric"].append(metric)
     data["Value"].append(value)
-
-
-def run_monte_carlo_simulation(
-    df_trades: pd.DataFrame, n_simulations: int = 1000, initial_capital: float = 100_000.0
-) -> dict:
-    """
-    Run Monte Carlo simulation on trade sequence.
-
-    Randomly shuffles trade order to estimate distribution of outcomes.
-
-    Args:
-        df_trades: DataFrame with trade records
-        n_simulations: Number of simulations to run
-        initial_capital: Starting capital
-
-    Returns:
-        Dict with simulation results including percentiles
-    """
-    if df_trades.empty or "pnl_usd" not in df_trades.columns:
-        return {}
-
-    # Get P&L from completed trades
-    sells = df_trades[df_trades["position"] == "sell"]
-    pnl_values = sells["pnl_usd"].values
-
-    if len(pnl_values) == 0:
-        return {}
-
-    rng = np.random.default_rng(42)
-
-    final_pnls = []
-    max_drawdowns = []
-
-    for _ in range(n_simulations):
-        # Shuffle trade order
-        shuffled_pnl = rng.permutation(pnl_values)
-
-        # Calculate cumulative P&L
-        cum_pnl = np.cumsum(shuffled_pnl)
-        portfolio = initial_capital + cum_pnl
-
-        # Calculate max drawdown
-        running_max = np.maximum.accumulate(portfolio)
-        drawdown = (running_max - portfolio) / running_max
-
-        final_pnls.append(cum_pnl[-1])
-        max_drawdowns.append(drawdown.max())
-
-    return {
-        "final_pnl_mean": np.mean(final_pnls),
-        "final_pnl_std": np.std(final_pnls),
-        "final_pnl_5th": np.percentile(final_pnls, 5),
-        "final_pnl_25th": np.percentile(final_pnls, 25),
-        "final_pnl_50th": np.percentile(final_pnls, 50),
-        "final_pnl_75th": np.percentile(final_pnls, 75),
-        "final_pnl_95th": np.percentile(final_pnls, 95),
-        "max_dd_mean": np.mean(max_drawdowns),
-        "max_dd_5th": np.percentile(max_drawdowns, 5),
-        "max_dd_95th": np.percentile(max_drawdowns, 95),
-        "simulations": n_simulations,
-        "final_pnls": final_pnls,
-        "max_drawdowns": max_drawdowns,
-    }

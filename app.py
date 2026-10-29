@@ -156,7 +156,7 @@ with st.sidebar:
 
     # Transaction costs settings
     st.markdown("#### Transaction Costs")
-    enable_costs = st.checkbox("Enable Transaction Costs", value=False)
+    enable_costs = st.checkbox("Enable Transaction Costs", value=True)
 
     if enable_costs:
         commission_per_trade = st.number_input(
@@ -229,7 +229,7 @@ STRATEGY_INFO = {
     "ratio": {
         "name": "Ratio Strategy",
         "icon": "📐",
-        "description": "Trade based on price ratios between two commodities in metric ton terms. Ideal for spread trading.",
+        "description": "Ratio-triggered outright: the soy/corn-style price ratio (in metric-ton terms) generates the signal, but only the primary commodity is traded. Not a two-leg spread.",
         "best_for": "Spread trading, mean-reverting pairs",
         "details": """
 Calculates the metric-ton price ratio between two commodities (e.g., Soybean/Corn). A buy signal triggers when the ratio falls below the entry threshold — indicating the primary commodity is cheap relative to the reference. A sell triggers when the ratio recovers above the exit threshold.
@@ -746,11 +746,16 @@ if st.session_state.confirmed_dates:
                     * first_price
                 )
 
+                # Metrics run on the backtest window only: days before start_date
+                # would otherwise enter the daily equity curve as zero returns and
+                # dilute Sharpe/Sortino.
+                df_window = df.loc[str(start_date):str(end_date)]
+
                 # Calculate performance metrics
                 if show_advanced_metrics:
                     metrics = backtest_performance_extended(
                         df_trades_final,
-                        df,
+                        df_window,
                         mtm_trade,
                         contract_size=contract_sizes[commodity_chosen],
                         tons_conversion=tons_conversion,
@@ -761,7 +766,7 @@ if st.session_state.confirmed_dates:
                 else:
                     metrics = backtest_performance(
                         df_trades_final,
-                        df,
+                        df_window,
                         mtm_trade,
                         contract_size=contract_sizes[commodity_chosen],
                         tons_conversion=tons_conversion,
@@ -851,22 +856,21 @@ if st.session_state.confirmed_dates:
                         hide_index=True
                     )
 
-                # Deep Analysis — CVaR, skewness/kurtosis, streaks, holding periods,
-                # Monte Carlo simulation (powered by src/metrics.py)
+                # Deep Analysis — CVaR, skewness/kurtosis, streaks, holding periods
+                # (powered by src/metrics.py; shares the headline daily equity curve)
                 if show_advanced_metrics:
                     with st.expander("🔬 Deep Analysis", expanded=False):
                         from src.metrics import (
                             calculate_comprehensive_metrics,
                             metrics_to_dataframe,
-                            run_monte_carlo_simulation,
                         )
-                        import plotly.graph_objects as go
 
                         deep_metrics = calculate_comprehensive_metrics(
                             df_trades=df_trades_final,
-                            df_prices=df,
+                            df_prices=df_window,
                             commodity_chosen=commodity_chosen,
                             initial_capital=initial_capital,
+                            mtm_trade=mtm_trade,
                         )
                         if deep_metrics.total_trades > 0:
                             deep_df = metrics_to_dataframe(deep_metrics)
@@ -878,48 +882,6 @@ if st.session_state.confirmed_dates:
                                     hide_index=True,
                                 )
 
-                            st.markdown("**Monte Carlo Simulation — 1 000 shuffled trade sequences**")
-                            mc = run_monte_carlo_simulation(
-                                df_trades_final,
-                                n_simulations=1000,
-                                initial_capital=initial_capital,
-                            )
-                            if mc:
-                                fig_mc = go.Figure()
-                                fig_mc.add_trace(
-                                    go.Histogram(
-                                        x=mc["final_pnls"],
-                                        nbinsx=40,
-                                        name="Terminal P&L",
-                                        marker_color="#2d5a87",
-                                        opacity=0.75,
-                                    )
-                                )
-                                fig_mc.add_vline(
-                                    x=mc["final_pnl_5th"],
-                                    line_dash="dash",
-                                    line_color="red",
-                                    annotation_text="5th pct",
-                                )
-                                fig_mc.add_vline(
-                                    x=mc["final_pnl_50th"],
-                                    line_dash="dash",
-                                    line_color="green",
-                                    annotation_text="Median",
-                                )
-                                fig_mc.add_vline(
-                                    x=mc["final_pnl_95th"],
-                                    line_dash="dash",
-                                    line_color="#1e3a5f",
-                                    annotation_text="95th pct",
-                                )
-                                fig_mc.update_layout(
-                                    xaxis_title="Terminal P&L (USD)",
-                                    yaxis_title="Frequency",
-                                    height=350,
-                                    margin=dict(l=40, r=40, t=30, b=40),
-                                )
-                                st.plotly_chart(fig_mc, use_container_width=True)
                         else:
                             st.info("Not enough trades for deep analysis.")
 

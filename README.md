@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![View App](https://img.shields.io/badge/🚀%20Live%20App-Streamlit-ff4b4b?logo=streamlit&logoColor=white)](https://commodity-backtester.streamlit.app/)
 
-An interactive backtesting framework for commodity trading strategies, built with Python and Streamlit. Test 25 years of historical performance using real futures data, visualise trade signals, and evaluate risk-adjusted returns with institutional-standard metrics.
+An interactive backtesting framework for commodity trading strategies, built with Python and Streamlit. Test 25 years of historical performance using real futures data, visualise trade signals, and evaluate risk-adjusted returns computed on a daily equity curve.
 
 > **Data source:** continuous front-month futures via Yahoo Finance (`ZS=F`, `ZC=F`, `KE=F`, `ZM=F`, `ZL=F`, `HO=F`, `CL=F`).
 > See [Known Limitations](#known-limitations) for important notes on roll adjustment.
@@ -15,7 +15,7 @@ An interactive backtesting framework for commodity trading strategies, built wit
 
 ## Features
 
-- **Five strategies** — Ratio (spread trigger), Bollinger Mean Reversion, Dual-EMA Momentum, Channel Breakout, MACD Crossover
+- **Five strategies** — Ratio (ratio-triggered outright, single leg), Bollinger Mean Reversion, Dual-EMA Momentum, Channel Breakout, MACD Crossover
 - **Correct PnL engine** — round-trip PnL in USD using CME/CBOT contract specifications; optional commission and slippage
 - **Risk analytics** — Sharpe, Sortino, Calmar, Profit Factor, Recovery Factor, VaR 95%, Max Drawdown — all computed on a capital-normalised equity curve
 - **T+1 execution model** — signals generated at close T are filled at close T+1; no same-bar look-ahead

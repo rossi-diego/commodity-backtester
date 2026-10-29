@@ -108,7 +108,7 @@ def backtest(
     if commodity_chosen not in df.columns:
         raise BacktestError(f"Commodity '{commodity_chosen}' not found in price data.")
 
-    df_range = df.loc[str(start_date) : str(end_date)].copy()  # type: ignore[misc]
+    df_range = df.loc[str(start_date) : str(end_date)].copy()
 
     if df_range.empty:
         raise BacktestError(f"No price data between {start_date} and {end_date}.")
