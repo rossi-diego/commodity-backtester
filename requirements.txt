@@ -1,9 +1,11 @@
 # ── Runtime dependencies ───────────────────────────────────────────────────────
-pandas>=2.2
-numpy>=1.26
-yfinance>=0.2.40
-streamlit>=1.35
-plotly>=5.22
-openpyxl>=3.1
-pyarrow>=15.0
-scipy>=1.11
+# Exact pins: the Streamlit Cloud demo builds from this file, so an unpinned
+# major release (e.g. pandas 3.x) must never change the demo silently.
+pandas==3.1.0
+numpy==2.4.6
+yfinance==1.7.0
+streamlit==1.66.1
+plotly==7.1.0
+openpyxl==3.1.5
+pyarrow==26.0.0
+scipy==1.17.1
