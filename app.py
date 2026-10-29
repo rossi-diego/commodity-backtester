@@ -143,7 +143,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1 style="margin:0;">📈 Commodity Backtester</h1>
-    <p style="margin:5px 0 0 0; opacity:0.9;">Backtest commodity spread strategies using real futures data</p>
+    <p style="margin:5px 0 0 0; opacity:0.9;">Backtest commodity hedge and trading rules on CBOT and NYMEX futures</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -230,7 +230,7 @@ STRATEGY_INFO = {
         "name": "Ratio Strategy",
         "icon": "📐",
         "description": "Ratio-triggered outright: the soy/corn-style price ratio (in metric-ton terms) generates the signal, but only the primary commodity is traded. Not a two-leg spread.",
-        "best_for": "Spread trading, mean-reverting pairs",
+        "best_for": "Relative-value signals on structurally linked pairs (signal only; single leg traded)",
         "details": """
 Calculates the metric-ton price ratio between two commodities (e.g., Soybean/Corn). A buy signal triggers when the ratio falls below the entry threshold — indicating the primary commodity is cheap relative to the reference. A sell triggers when the ratio recovers above the exit threshold.
 
@@ -461,7 +461,7 @@ if st.session_state.confirmed_commodities:
         )
 
     with col3:
-        st.metric("Trading Days", f"{(pd.to_datetime(end_date) - pd.to_datetime(start_date)).days:,}")
+        st.metric("Trading Days", f"{len(df.loc[str(start_date):str(end_date)]):,}")
 
     if start_date >= end_date:
         st.error("❌ Start date must be before end date.")
@@ -504,6 +504,10 @@ if st.session_state.confirmed_dates:
         stat_cols[4].metric("Current", f"{df_filtered['ratio'].iloc[-1]:.4f}")
 
         st.markdown("#### 🎯 Entry/Exit Thresholds")
+        st.caption(
+            "Defaults are the mean ± 1σ of the ratio over the selected window: in-sample and "
+            "illustrative only, since they use the same data that is traded."
+        )
 
         col1, col2 = st.columns(2)
 

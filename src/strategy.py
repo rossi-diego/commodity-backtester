@@ -3,7 +3,7 @@ Backtesting engine for commodity trading strategies.
 
 Supported strategies
 --------------------
-``"ratio"``          — spread ratio mean reversion
+``"ratio"``          — ratio-triggered outright (signal from a price ratio, single leg)
 ``"mean_reversion"`` — Bollinger Bands
 ``"momentum"``       — dual EMA crossover + RSI filter
 ``"breakout"``       — channel breakout
