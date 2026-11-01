@@ -200,6 +200,23 @@ class TestColdResponse:
             _refresh_with(response)
         assert not cache_file.exists()
 
+    def test_cold_response_column_ending_early_is_rejected(self, cache_file):
+        """Without this, every cold boot could show a stale market under a current date."""
+        response = _full_cached_df("2000-03-15", "2024-06-28")
+        response.loc[response.index > "2023-08-31", "Corn"] = np.nan
+
+        with pytest.raises(DataLoaderError, match="Corn ends before the rest of the response"):
+            _refresh_with(response)
+        assert not cache_file.exists()
+
+    def test_cold_response_with_a_holiday_gap_at_the_end_is_accepted(self, cache_file):
+        """A market closed for the last sessions is normal, within the stale slack."""
+        response = _full_cached_df("2000-03-15", "2024-06-28")
+        response.loc[response.index > "2024-06-26", "Corn"] = np.nan
+
+        _refresh_with(response)
+        assert cache_file.exists()
+
     def test_cold_response_missing_column_is_rejected(self, cache_file):
         response = _full_cached_df("2000-03-15", "2024-06-28").drop(columns="Corn")
         with pytest.raises(DataLoaderError, match="Corn has no values"):

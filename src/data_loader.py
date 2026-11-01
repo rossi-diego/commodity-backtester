@@ -168,7 +168,8 @@ def _response_problems(
 ) -> list[str]:
     """List the reasons a downloaded frame must not replace the cache.
 
-    Every tracked column needs at least one value. With a cache, each column must
+    Every tracked column needs at least one value and must end with the rest of the
+    response, within ``CACHE_STALE_AFTER_DAYS``. With a cache, each column must
     keep at least 90% of its cached observations and must not end earlier. A
     column that is missing or empty in the cache imposes no constraint, so a good
     response can repair an imperfect cache. Without a cache, each column must
@@ -182,6 +183,9 @@ def _response_problems(
         if new.empty:
             problems.append(f"{column} has no values")
             continue
+
+        if new[-1] < raw.index.max() - pd.Timedelta(days=config.CACHE_STALE_AFTER_DAYS):
+            problems.append(f"{column} ends before the rest of the response")
 
         if cached is None:
             if new[0] > latest_start:
