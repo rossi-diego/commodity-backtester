@@ -167,7 +167,11 @@ def _render_backtest(prices: pd.DataFrame, bounds: tuple[datetime.date, datetime
             )
 
     rule = RULE_KEY_BY_LABEL[rule_label]
-    series = prices[market].dropna()
+    series = prices[market].dropna() if market in prices else pd.Series(dtype=float)
+    if series.empty:
+        st.warning(f"No {market} prices are available.", icon=":material/warning:")
+        return
+
     window = _resolve_window(period, custom_start, custom_end, series)
     if window is None:
         return
@@ -298,7 +302,17 @@ def _render_monitor(prices: pd.DataFrame, bounds: tuple[datetime.date, datetime.
         )
         period, custom_start, custom_end = _period_control(bounds)
 
-    ratio = ratio_series(prices, *RATIO_PAIRS[pair], tons_conversion)
+    first_leg, second_leg = RATIO_PAIRS[pair]
+    has_legs = first_leg in prices and second_leg in prices
+    ratio = (
+        ratio_series(prices, first_leg, second_leg, tons_conversion)
+        if has_legs
+        else pd.Series(dtype=float)
+    )
+    if ratio.empty:
+        st.warning(f"No {pair} data is available.", icon=":material/warning:")
+        return
+
     window = _resolve_window(period, custom_start, custom_end, ratio)
     if window is None:
         return
@@ -315,7 +329,8 @@ def _render_monitor(prices: pd.DataFrame, bounds: tuple[datetime.date, datetime.
         st.metric(
             "Level",
             f"{snapshot.level:.3f}",
-            delta=f"USD/MT, {snapshot.as_of}",
+            delta="USD/MT basis",
+            help=f"Ratio at the close of {snapshot.as_of}.",
             **METRIC_STYLE,
         )
         st.metric(

@@ -11,7 +11,7 @@ borderColor = "#e3e6eb"
 linkColor = "#1f5fbf"
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap, sans-serif"
 headingFontWeights = [600, 600, 600, 600, 600, 600]
-headingFontSizes = ["1.5rem", "1.125rem", "1rem", "0.875rem", "0.875rem", "0.875rem"]
+headingFontSizes = ["1.5rem", "1.125rem", "1.125rem", "0.875rem", "0.875rem", "0.875rem"]
 baseFontSize = 15
 metricValueFontSize = "1.5rem"
 metricValueFontWeight = 600

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import datetime
 import itertools
+import json
 import re
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import pytest
 import streamlit as st
@@ -49,6 +52,32 @@ def app(tmp_path, monkeypatch, synthetic_prices):
 
 def _labels(at: AppTest) -> list[str]:
     return [metric.label for metric in at.metric]
+
+
+def _headline_labels(at: AppTest) -> list[str]:
+    """Metric labels outside the expanders. The Sharpe lives in one, even while closed."""
+    in_expanders = [metric.label for expander in at.expander for metric in expander.metric]
+    labels = _labels(at)
+    for label in in_expanders:
+        labels.remove(label)
+    return labels
+
+
+def _chart_spec(at: AppTest, key: str) -> dict:
+    chart = next(chart for chart in at.get("plotly_chart") if key in chart.proto.id)
+    return json.loads(chart.proto.spec)
+
+
+def _trace(spec: dict, name: str) -> dict:
+    return next(trace for trace in spec["data"] if trace.get("name") == name)
+
+
+def _trace_y(trace: dict) -> np.ndarray:
+    """Plotly serialises float arrays as base64 with a dtype."""
+    y = trace["y"]
+    if isinstance(y, dict):
+        return np.frombuffer(base64.b64decode(y["bdata"]), dtype=y["dtype"]).astype(float)
+    return np.asarray(y, dtype=float)
 
 
 def _metric(at: AppTest, label: str):
@@ -94,7 +123,7 @@ class TestFirstLoad:
         app.run()
         _no_exceptions(app)
         _assert_headlines(app)
-        assert len(app.metric) == 4
+        assert len(_headline_labels(app)) == 4
         assert _charts(app), "A chart must be on the first screen."
         assert not any("run" in button.label.lower() for button in app.button)
 
@@ -138,6 +167,32 @@ class TestFirstLoad:
         before = _usd(_metric(app, "Unadjusted P&L"))
         app.number_input(key="commission").set_value(50.0).run()
         assert _usd(_metric(app, "Unadjusted P&L")) < before
+
+    def test_slippage_changes_pnl(self, app) -> None:
+        app.run()
+        app.selectbox(key="rule").set_value("Donchian 20/10").run()
+        before = _usd(_metric(app, "Unadjusted P&L"))
+        app.number_input(key="slippage").set_value(1.0).run()
+        assert _usd(_metric(app, "Unadjusted P&L")) < before
+
+    def test_view_control_cannot_be_cleared(self, app) -> None:
+        """Without required=True, clicking the active view selects nothing at all."""
+        app.run()
+        assert app.button_group(key="view").proto.required is True
+
+    def test_price_axis_uses_the_market_unit(self, app) -> None:
+        app.run()
+        assert _chart_spec(app, "price_chart")["layout"]["yaxis"]["title"]["text"] == "cents/bushel"
+        app.selectbox(key="market").set_value("Crude Oil (WTI)").run()
+        assert _chart_spec(app, "price_chart")["layout"]["yaxis"]["title"]["text"] == "USD/barrel"
+
+    def test_pnl_chart_shows_the_open_position(self, app) -> None:
+        app.run()
+        app.selectbox(key="rule").set_value("Buy & hold").run()
+        assert _metric(app, "Position now").value == "Long"
+        open_trace = _trace(_chart_spec(app, "pnl_chart"), "With open position")
+        headline = _usd(_metric(app, "Unadjusted P&L"))
+        assert _trace_y(open_trace)[-1] == pytest.approx(headline, abs=1.0)
 
     def test_all_market_rule_period_combinations(self, app) -> None:
         app.run()
@@ -402,7 +457,22 @@ class TestMonitor:
             _no_exceptions(app)
         _set_custom(app, datetime.date(2008, 1, 2), datetime.date(2012, 12, 31))
         _no_exceptions(app)
-        assert "2012-12-31" in _metric(app, "Level").delta
+        assert "2012-12-31" in _metric(app, "Level").proto.help
+
+    def test_level_is_labelled_as_a_basis_not_a_price(self, app) -> None:
+        app.run()
+        _switch_view(app, "Ratio monitor")
+        assert _metric(app, "Level").delta == "USD/MT basis"
+
+    def test_zscore_uses_history_before_a_short_window(self, app) -> None:
+        """Statistics run on the full history. On the window alone, 1Y would have no z-score."""
+        app.run()
+        _switch_view(app, "Ratio monitor")
+        app.selectbox(key="period").set_value("1Y").run()
+        spec = _chart_spec(app, "zscore_chart")
+        assert np.isfinite(_trace_y(_trace(spec, "Z-score"))).all()
+        mean = _trace(_chart_spec(app, "ratio_chart"), "1y mean")
+        assert np.isfinite(_trace_y(mean)).all()
 
     def test_monitor_window_without_data_warns(self, app) -> None:
         app.run()
@@ -454,6 +524,72 @@ class TestTradeLog:
 # ---------------------------------------------------------------------------
 # Data failure states
 # ---------------------------------------------------------------------------
+
+
+class TestDamagedCache:
+    """A cache hit with a bad column must warn in that market and leave the rest usable."""
+
+    @pytest.fixture(params=["all_nan", "missing"])
+    def damaged_app(self, request, tmp_path, monkeypatch, synthetic_prices):
+        frame = synthetic_prices.copy()
+        if request.param == "all_nan":
+            frame["Corn"] = np.nan
+        else:
+            frame = frame.drop(columns="Corn")
+        path = tmp_path / "damaged.parquet"
+        frame.to_parquet(path)
+        monkeypatch.setattr(config, "YFINANCE_RAW", path)
+        st.cache_data.clear()
+        with patch("src.data_loader.yf.download") as download:
+            yield _new_app()
+        download.assert_not_called()
+        st.cache_data.clear()
+
+    def test_backtest_warns_and_keeps_the_controls(self, damaged_app) -> None:
+        damaged_app.run()
+        _no_exceptions(damaged_app)
+        _assert_headlines(damaged_app)
+
+        damaged_app.selectbox(key="market").set_value("Corn").run()
+
+        _no_exceptions(damaged_app)
+        assert any("No Corn prices are available" in w.value for w in damaged_app.warning)
+        assert not damaged_app.metric
+        assert not _charts(damaged_app)
+        assert len(damaged_app.selectbox) >= 3, "Controls must stay available."
+
+        damaged_app.selectbox(key="market").set_value("Soybean").run()
+        _no_exceptions(damaged_app)
+        _assert_headlines(damaged_app)
+
+    def test_monitor_warns_and_keeps_the_controls(self, damaged_app) -> None:
+        damaged_app.run()
+        _switch_view(damaged_app, "Ratio monitor")
+
+        _no_exceptions(damaged_app)
+        assert any("No Soybean / Corn data is available" in w.value for w in damaged_app.warning)
+        assert not damaged_app.metric
+        assert not _charts(damaged_app)
+        assert [box.label for box in damaged_app.selectbox] == ["Pair", "Period"]
+
+        damaged_app.selectbox(key="pair").set_value("Heating Oil / WTI").run()
+        _no_exceptions(damaged_app)
+        assert _labels(damaged_app) == ["Level", "Z-score", "Percentile"]
+
+    def test_default_market_damaged_on_first_load(self, tmp_path, monkeypatch, synthetic_prices):
+        """Regression: an empty default market raised IndexError on the first screen."""
+        frame = synthetic_prices.copy()
+        frame["Soybean"] = np.nan
+        path = tmp_path / "damaged.parquet"
+        frame.to_parquet(path)
+        monkeypatch.setattr(config, "YFINANCE_RAW", path)
+        st.cache_data.clear()
+        with patch("src.data_loader.yf.download") as download:
+            at = _new_app().run()
+        download.assert_not_called()
+        _no_exceptions(at)
+        assert any("No Soybean prices are available" in w.value for w in at.warning)
+        st.cache_data.clear()
 
 
 class TestDataStates:
