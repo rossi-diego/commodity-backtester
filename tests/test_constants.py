@@ -2,7 +2,38 @@
 
 from __future__ import annotations
 
-from src.constants import commodities_dict, contract_sizes, tickers, tons_conversion
+from src.constants import (
+    COMMODITY_UNITS,
+    RATIO_PAIRS,
+    commodities_dict,
+    contract_sizes,
+    tickers,
+    tons_conversion,
+)
+
+
+class TestRatioPairs:
+    def test_four_curated_pairs(self) -> None:
+        assert len(RATIO_PAIRS) == 4
+
+    def test_every_leg_has_contract_data(self) -> None:
+        for pair, legs in RATIO_PAIRS.items():
+            for leg in legs:
+                assert leg in contract_sizes, f"Pair '{pair}': no contract size for '{leg}'."
+                assert leg in tons_conversion, f"Pair '{pair}': no conversion for '{leg}'."
+
+    def test_legs_differ(self) -> None:
+        for pair, (first, second) in RATIO_PAIRS.items():
+            assert first != second, f"Pair '{pair}' uses the same market twice."
+
+
+class TestCommodityUnits:
+    def test_lookup_is_by_display_name(self) -> None:
+        assert set(COMMODITY_UNITS) == set(contract_sizes)
+        assert set(COMMODITY_UNITS) == set(tons_conversion)
+
+    def test_soybean_unit(self) -> None:
+        assert COMMODITY_UNITS["Soybean"] == "cents/bushel"
 
 
 class TestTickers:
