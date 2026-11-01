@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from itertools import permutations
-
 import numpy as np
 import pandas as pd
 
@@ -13,7 +11,6 @@ __all__ = [
     "pnl_trades",
     "backtest_performance",
     "backtest_performance_extended",
-    "strategy_describe",
 ]
 
 ANNUALISATION_FACTOR = np.sqrt(config.TRADING_DAYS_PER_YEAR)
@@ -145,31 +142,6 @@ def backtest_performance_extended(
         extended=True,
         initial_capital=initial_capital,
     )
-
-
-# ---------------------------------------------------------------------------
-# Descriptive statistics across all spreads
-# ---------------------------------------------------------------------------
-
-
-def strategy_describe(
-    df: pd.DataFrame,
-    tons_conversion: dict[str, float],
-    backtest_strategy: str | None = None,
-) -> pd.DataFrame:
-    if backtest_strategy != "ratio":
-        return pd.DataFrame(index=df.index)
-
-    summary: list[pd.Series] = []
-    for col_a, col_b in permutations(df.columns, 2):
-        if col_a in tons_conversion and col_b in tons_conversion:
-            ratio = (df[col_a] * tons_conversion[col_a]) / (df[col_b] * tons_conversion[col_b])
-            stats = ratio.describe()
-            stats["coefficient_variation"] = stats["std"] / stats["mean"]
-            stats.name = f"{col_a}/{col_b}"
-            summary.append(stats)
-
-    return pd.DataFrame(summary).round(4) if summary else pd.DataFrame()
 
 
 # ---------------------------------------------------------------------------

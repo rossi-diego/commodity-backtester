@@ -8,7 +8,6 @@ Usage:
     streamlit run app.py
 
 Author: Diego Rossi
-Version: 2.0.0
 """
 
 import datetime
@@ -16,22 +15,20 @@ import io
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import streamlit as st
 
 # Ensure src is in path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src import config
-from src.constants import commodities_dict, contract_sizes, tons_conversion, COMMODITIES
-from src.data_loader import yahoo_quotes, DataLoaderError
-from src.strategy import backtest, BacktestError, StrategyType, get_available_strategies
-from src.utils import pnl_trades, backtest_performance, backtest_performance_extended
-from src.visualization import backtest_charts, create_strategy_comparison_chart
-
+from src.constants import COMMODITIES, commodities_dict, contract_sizes, tons_conversion
+from src.data_loader import DataLoaderError, yahoo_quotes
+from src.strategy import BacktestError, backtest
+from src.utils import backtest_performance, backtest_performance_extended, pnl_trades
+from src.visualization import backtest_charts
 
 # ---------------------------------------------------------------------------
 # Cached data loader — avoids re-downloading on every widget interaction
@@ -78,46 +75,6 @@ st.markdown("""
         padding: 1.5rem;
         border-radius: 10px;
         margin-bottom: 1rem;
-    }
-    .metric-card {
-        background-color: white;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin: 10px 0;
-    }
-    .strategy-card {
-        background-color: white;
-        border: 2px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 15px;
-        margin: 10px 0;
-        transition: border-color 0.3s;
-    }
-    .strategy-card:hover {
-        border-color: #1e3a5f;
-    }
-    .positive-value {
-        color: #28a745;
-        font-weight: bold;
-    }
-    .negative-value {
-        color: #dc3545;
-        font-weight: bold;
-    }
-    .info-box {
-        background-color: #e7f3ff;
-        border-left: 4px solid #2196f3;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 0 8px 8px 0;
-    }
-    .warning-box {
-        background-color: #fff3e0;
-        border-left: 4px solid #ff9800;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 0 8px 8px 0;
     }
     div[data-testid="stMetric"] {
         background-color: white;
@@ -342,7 +299,7 @@ commodities = list(commodities_dict.values())
 
 # Group commodities by exchange
 commodity_groups = {}
-for ticker, spec in COMMODITIES.items():
+for spec in COMMODITIES.values():
     exchange = spec.exchange
     if exchange not in commodity_groups:
         commodity_groups[exchange] = []
@@ -860,35 +817,6 @@ if st.session_state.confirmed_dates:
                         hide_index=True
                     )
 
-                # Deep Analysis — CVaR, skewness/kurtosis, streaks, holding periods
-                # (powered by src/metrics.py; shares the headline daily equity curve)
-                if show_advanced_metrics:
-                    with st.expander("🔬 Deep Analysis", expanded=False):
-                        from src.metrics import (
-                            calculate_comprehensive_metrics,
-                            metrics_to_dataframe,
-                        )
-
-                        deep_metrics = calculate_comprehensive_metrics(
-                            df_trades=df_trades_final,
-                            df_prices=df_window,
-                            commodity_chosen=commodity_chosen,
-                            initial_capital=initial_capital,
-                            mtm_trade=mtm_trade,
-                        )
-                        if deep_metrics.total_trades > 0:
-                            deep_df = metrics_to_dataframe(deep_metrics)
-                            for category, group in deep_df.groupby("Category", sort=False):
-                                st.markdown(f"**{category}**")
-                                st.dataframe(
-                                    group[["Metric", "Value"]].reset_index(drop=True),
-                                    use_container_width=True,
-                                    hide_index=True,
-                                )
-
-                        else:
-                            st.info("Not enough trades for deep analysis.")
-
                 # Charts
                 st.markdown("#### 📈 Interactive Charts")
 
@@ -905,7 +833,6 @@ if st.session_state.confirmed_dates:
                         end_date=end_date,
                         mtm_trade=mtm_trade,
                         tons_conversion=tons_conversion,
-                        use_streamlit=True,
                         chart_type="price"
                     )
 
@@ -921,7 +848,6 @@ if st.session_state.confirmed_dates:
                             end_date=end_date,
                             mtm_trade=mtm_trade,
                             tons_conversion=tons_conversion,
-                            use_streamlit=True,
                             chart_type="ratio"
                         )
                     else:
@@ -938,7 +864,6 @@ if st.session_state.confirmed_dates:
                         end_date=end_date,
                         mtm_trade=mtm_trade,
                         tons_conversion=tons_conversion,
-                        use_streamlit=True,
                         chart_type="pnl"
                     )
 

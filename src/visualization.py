@@ -7,17 +7,9 @@ from typing import Literal
 
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 
-try:
-    import streamlit as st
-
-    _HAS_STREAMLIT = True
-except ImportError:
-    st = None  # type: ignore[assignment]
-    _HAS_STREAMLIT = False
-
-
-__all__ = ["backtest_charts", "create_strategy_comparison_chart"]
+__all__ = ["backtest_charts"]
 
 ChartType = Literal["price", "ratio", "pnl"]
 
@@ -32,7 +24,6 @@ def backtest_charts(
     end_date: datetime.date | str,
     mtm_trade: dict[str, object] | None,
     tons_conversion: dict[str, float],
-    use_streamlit: bool = True,
     chart_type: ChartType = "price",
 ) -> None:
     """Render a single interactive Plotly chart based on ``chart_type``.
@@ -46,17 +37,14 @@ def backtest_charts(
     """
     plot_df = df_prices.copy()
     plot_df.index = pd.to_datetime(plot_df.index)
-    plot_df = plot_df.loc[str(start_date) : str(end_date)]  # type: ignore[misc]
-
-    _render = _streamlit_render if (use_streamlit and _HAS_STREAMLIT) else _standalone_render
+    plot_df = plot_df.loc[str(start_date) : str(end_date)]
 
     if chart_type == "price":
         _render(_price_chart(plot_df, df_trades, commodity_chosen, mtm_trade))
 
     elif chart_type == "ratio":
         if "ratio" not in plot_df.columns:
-            if _HAS_STREAMLIT and st is not None:
-                st.info("Ratio chart is only available for the Ratio strategy.")
+            st.info("Ratio chart is only available for the Ratio strategy.")
             return
         _render(_ratio_chart(plot_df, down_entry, up_exit))
 
@@ -64,45 +52,6 @@ def backtest_charts(
         if "pnl_usd_cumsum" not in df_trades.columns:
             return
         _render(_pnl_chart(df_trades, mtm_trade))
-
-
-def create_strategy_comparison_chart(
-    results: dict[str, pd.DataFrame],
-    use_streamlit: bool = True,
-) -> None:
-    """Overlay cumulative PnL curves for multiple strategies.
-
-    Parameters
-    ----------
-    results:
-        Mapping of strategy name → trade log DataFrame (must have ``pnl_usd_cumsum``).
-    """
-    fig = go.Figure()
-    colours = ["#2563eb", "#16a34a", "#dc2626", "#7c3aed", "#f59e0b"]
-
-    for i, (name, df_trades) in enumerate(results.items()):
-        if "pnl_usd_cumsum" not in df_trades.columns or df_trades.empty:
-            continue
-        fig.add_trace(
-            go.Scatter(
-                x=df_trades.index,
-                y=df_trades["pnl_usd_cumsum"],
-                mode="lines",
-                name=name,
-                line={"color": colours[i % len(colours)]},
-            )
-        )
-
-    fig.update_layout(
-        title="Strategy Comparison — Cumulative PnL (USD)",
-        xaxis_title="Date",
-        yaxis_title="PnL (USD)",
-        template="plotly_white",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02},
-    )
-
-    _render = _streamlit_render if (use_streamlit and _HAS_STREAMLIT) else _standalone_render
-    _render(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -256,10 +205,5 @@ def _pnl_chart(df_trades: pd.DataFrame, mtm_trade: dict[str, object] | None) -> 
 # ---------------------------------------------------------------------------
 
 
-def _streamlit_render(fig: go.Figure) -> None:
-    if st is not None:
-        st.plotly_chart(fig, use_container_width=True)
-
-
-def _standalone_render(fig: go.Figure) -> None:
-    fig.show()
+def _render(fig: go.Figure) -> None:
+    st.plotly_chart(fig, use_container_width=True)
