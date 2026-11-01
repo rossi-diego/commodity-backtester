@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import datetime
+
 import numpy as np
 import pandas as pd
 import pytest
+
+from src.constants import commodities_dict
 
 # ---------------------------------------------------------------------------
 # Synthetic price data
@@ -33,6 +37,29 @@ def price_df() -> pd.DataFrame:
         {"Soybean": soybean_prices, "Corn": corn_prices},
         index=dates,
     )
+    df.index.name = "date"
+    return df
+
+
+@pytest.fixture(scope="session")
+def synthetic_prices() -> pd.DataFrame:
+    """Seven-market frame shaped like the real cache: 2000 to today, with its data flaws.
+
+    It starts in early 2000 so that it counts as a cache hit for the default request,
+    and ends on the last business day so that it is not stale. Each market has isolated
+    NaN rows, and Crude Oil has the negative close of 2020-04-20.
+    """
+    dates = pd.bdate_range("2000-01-03", datetime.date.today())
+    rng = np.random.default_rng(seed=7)
+    columns = {}
+    for name in commodities_dict.values():
+        steps = rng.normal(0.0002, 0.015, len(dates))
+        walk = 100 * np.exp(np.cumsum(steps))
+        walk[rng.integers(0, len(dates), size=25)] = np.nan
+        columns[name] = walk
+
+    df = pd.DataFrame(columns, index=dates)
+    df.loc["2020-04-20", "Crude Oil (WTI)"] = -37.63
     df.index.name = "date"
     return df
 
