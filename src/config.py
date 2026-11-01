@@ -32,6 +32,18 @@ YFINANCE_RAW: Final[Path] = DATA_DIR / "yfinance_raw.parquet"
 # meaningful drawdown and regime coverage across full commodity cycles)
 DEFAULT_START_DATE: Final[str] = "2000-01-01"
 
+# Slack between the first cached date and the requested start. The first date in
+# the Yahoo frame is 2000-03-15 when 2000-01-01 is requested.
+CACHE_START_SLACK_DAYS: Final[int] = 120
+
+# Slack between each column's first date and the requested start when there is no
+# cache to compare with. Real columns start up to 264 days after 2000-01-01.
+COLUMN_START_SLACK_DAYS: Final[int] = 365
+
+# Days without a new close before the cache is refreshed and the data is labelled
+# as possibly out of date. Covers weekends and exchange holidays.
+CACHE_STALE_AFTER_DAYS: Final[int] = 5
+
 # VaR confidence level
 VAR_CONFIDENCE_LEVEL: Final[float] = 0.95
 
