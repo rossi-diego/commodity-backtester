@@ -6,8 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.strategy import backtest
-from src.utils import backtest_performance, backtest_performance_extended, pnl_trades
+from src.strategy import _build_trades
+from src.utils import (
+    backtest_performance,
+    backtest_performance_extended,
+    pnl_trades,
+    summarize_backtest,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,17 +26,16 @@ def _run_full(
     up_exit: float = 1.25,
     down_entry: float = 1.10,
 ) -> tuple[pd.DataFrame, dict | None, bool]:
-    df_trades_raw, pos_open = backtest(
-        backtest_strategy="ratio",
-        start_date=price_df.index[0],
-        end_date=price_df.index[-1],
-        df=price_df.copy(),
-        up_exit=up_exit,
-        down_entry=down_entry,
+    ratio = (price_df["Soybean"] * tons_conv["Soybean"]) / (price_df["Corn"] * tons_conv["Corn"])
+    signals = (ratio < down_entry).astype(int) - (ratio > up_exit).astype(int)
+    df_trades_raw, pos_open = _build_trades(
+        signals=signals,
+        prices=price_df["Soybean"],
         commodity_chosen="Soybean",
-        commodity_ratio="Corn",
         tons_conversion=tons_conv,
         contract_size=contract_sz,
+        stop_loss_pct=None,
+        take_profit_pct=None,
     )
     df_trades, mtm = pnl_trades(
         df_trades=df_trades_raw,
@@ -453,3 +457,70 @@ class TestBacktestWindow:
             return float(result.loc[result["Metric"] == "Sharpe Ratio", "Value"].iloc[0])
 
         assert abs(sharpe(padded)) < abs(sharpe(price_df))
+
+
+# ---------------------------------------------------------------------------
+# Summary for the first screen
+# ---------------------------------------------------------------------------
+
+
+class TestSummarizeBacktest:
+    DATES = pd.date_range("2022-01-03", periods=10, freq="B")
+
+    def _window(self) -> pd.Series:
+        return pd.Series(100.0, index=self.DATES, name="Soybean")
+
+    def _trades(self, positions: list[str], rows: list[int], pnl: list[float]) -> pd.DataFrame:
+        df = pd.DataFrame(
+            {
+                "trade_price": 100.0,
+                "position": positions,
+                "pnl_usd": pnl,
+                "pnl_usd_cumsum": np.cumsum(pnl),
+            },
+            index=self.DATES[rows],
+        )
+        df.index.name = "date"
+        return df
+
+    def test_long_with_open_position(self) -> None:
+        trades = self._trades(["buy", "sell", "buy"], [1, 3, 6], [0.0, 50.0, 0.0])
+        mtm = {"date": self.DATES[-1], "pnl_usd": 25.0}
+        summary = summarize_backtest(trades, self._window(), mtm, True)
+        assert summary.position == "Long"
+        assert summary.since == self.DATES[6].date()
+        assert summary.round_trips == 1
+        assert summary.fills == 3
+        assert summary.unadjusted_pnl == 75.0
+
+    def test_flat_after_closing(self) -> None:
+        trades = self._trades(["buy", "sell"], [1, 3], [0.0, -40.0])
+        summary = summarize_backtest(trades, self._window(), None, False)
+        assert summary.position == "Flat"
+        assert summary.since == self.DATES[3].date()
+        assert summary.round_trips == 1
+        assert summary.fills == 2
+        assert summary.unadjusted_pnl == -40.0
+
+    def test_empty_log_without_pnl_column(self) -> None:
+        empty = pd.DataFrame(columns=["trade_price", "position", "quantity", "VaR_95"])
+        summary = summarize_backtest(empty, self._window(), None, False)
+        assert summary.position == "Flat"
+        assert summary.since is None
+        assert summary.round_trips == 0
+        assert summary.fills == 0
+        assert summary.time_in_market == 0.0
+        assert summary.unadjusted_pnl == 0.0
+
+    def test_time_in_market_by_hand(self) -> None:
+        """Long on rows 1 and 2 (exit fill on 3), then on rows 6 to 9: 6 of 10 sessions."""
+        trades = self._trades(["buy", "sell", "buy"], [1, 3, 6], [0.0, 50.0, 0.0])
+        summary = summarize_backtest(trades, self._window(), None, True)
+        assert summary.time_in_market == pytest.approx(0.6)
+
+    def test_single_open_fill_has_no_round_trips(self) -> None:
+        trades = self._trades(["buy"], [1], [0.0])
+        summary = summarize_backtest(trades, self._window(), None, True)
+        assert summary.round_trips == 0
+        assert summary.fills == 1
+        assert summary.time_in_market == pytest.approx(0.9)
