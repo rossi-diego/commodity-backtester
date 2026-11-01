@@ -150,7 +150,7 @@ These are deliberate simplifications for a portfolio project. A production syste
 
 | Limitation | Detail |
 |---|---|
-| **No roll adjustment on continuous tickers** | Yahoo Finance `=F` tickers roll to the nearest front-month contract but apply **no Panama, proportional, or ratio back-adjustment**. Each quarterly roll introduces a price discontinuity (typically 5–20+ cents/bushel for grains), which is booked as P&L and also moves ratios. A production system would use a properly back-adjusted continuous series (e.g., from Refinitiv, Barchart, or a self-built Panama-adjusted series). |
+| **No roll adjustment on continuous tickers** | Yahoo Finance `=F` tickers roll to the nearest front-month contract but apply **no Panama, proportional, or ratio back-adjustment**. Grains roll 5 to 8 times a year and energy every month, and each roll introduces a price discontinuity (typically 5–20+ cents/bushel for grains), which is booked as P&L and also moves ratios. A production system would use a properly back-adjusted continuous series (e.g., from Refinitiv, Barchart, or a self-built Panama-adjusted series). |
 | **Close-to-close T+1 execution** | Fills are modelled at the next day's closing price. In practice, a systematic strategy would execute at the open or use a VWAP algo, often improving on the close-to-close assumption. |
 | **Flat position sizing** | Each signal trades exactly one contract. A real system would size positions by volatility target (e.g., 1 % of AUM per unit of daily volatility). |
 | **No margin or funding cost** | The PnL engine deducts commission and slippage but not overnight financing or initial margin requirements. |
