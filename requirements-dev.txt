@@ -7,4 +7,3 @@ pytest-cov==7.1.0
 ruff==0.17.3
 mypy==2.4.1
 pandas-stubs==3.0.5.260914
-types-requests==2.33.0.20261006

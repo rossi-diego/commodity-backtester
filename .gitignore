@@ -2,7 +2,6 @@
 .venv/
 venv/
 env/
-backtest/
 *.venv
 
 # ── Python cache ───────────────────────────────────────────────────────────────
@@ -15,10 +14,6 @@ __pycache__/
 dist/
 build/
 *.egg
-
-# ── Jupyter ────────────────────────────────────────────────────────────────────
-.ipynb_checkpoints/
-*.ipynb_checkpoints
 
 # ── Testing & coverage ─────────────────────────────────────────────────────────
 .pytest_cache/
@@ -41,17 +36,9 @@ htmlcov/
 data/*.csv
 data/*.parquet
 data/*.xlsx
-results/
-
-# ── Package manager lock files ─────────────────────────────────────────────────
-uv.lock
 
 # ── Editor / workspace files ───────────────────────────────────────────────────
 *.code-workspace
-BACKLOG.md
-
-# ── Generated notebook output ──────────────────────────────────────────────────
-notebooks/iframe_figures/
 
 # ── OS ─────────────────────────────────────────────────────────────────────────
 .DS_Store

@@ -1,11 +1,7 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
-
 [project]
 name = "commodity-backtester"
 version = "0.2.0"
-description = "Interactive backtesting framework for commodity spread strategies"
+description = "Interactive backtester for rules on CBOT and NYMEX commodity futures"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -61,16 +57,8 @@ disallow_any_generics = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = ["yfinance.*", "streamlit.*", "plotly.*", "scipy.*"]
+module = ["yfinance.*", "streamlit.*", "plotly.*"]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["src.metrics"]
-ignore_errors = true   # legacy file; type errors tracked in BACKLOG issue #9
-
-[[tool.mypy.overrides]]
-module = ["src.visualization"]
-warn_unused_ignores = false   # st = None ignore needed when streamlit ships py.typed
 
 # ── Pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
@@ -83,7 +71,6 @@ addopts = [
     "--tb=short",
     "--cov=src",
     "--cov-report=term-missing",
-    "--cov-report=xml",
     "--cov-fail-under=60",
 ]
 
