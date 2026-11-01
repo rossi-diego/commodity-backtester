@@ -37,23 +37,11 @@ __all__ = [
     "BacktestError",
     "StrategyType",
     "backtest",
-    "get_available_strategies",
 ]
 
 
 class BacktestError(Exception):
     """Raised when backtest execution fails due to invalid inputs or data."""
-
-
-def get_available_strategies() -> dict[str, str]:
-    """Return a mapping of strategy key → human-readable name."""
-    return {
-        "ratio": "Ratio Strategy",
-        "mean_reversion": "Mean Reversion (Bollinger Bands)",
-        "momentum": "Momentum / Trend Following",
-        "breakout": "Breakout Strategy",
-        "macd": "MACD Crossover",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -91,8 +79,6 @@ def backtest(
     macd_fast: int = 12,
     macd_slow: int = 26,
     macd_signal: int = 9,
-    # legacy compat
-    window: int = 20,
 ) -> tuple[pd.DataFrame, bool]:
     """Run a backtest for the given strategy over the specified date range.
 
