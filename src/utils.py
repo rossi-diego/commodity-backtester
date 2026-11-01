@@ -2,18 +2,73 @@
 
 from __future__ import annotations
 
+import datetime
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
 from . import config
 
 __all__ = [
+    "BacktestSummary",
     "pnl_trades",
     "backtest_performance",
     "backtest_performance_extended",
+    "summarize_backtest",
 ]
 
 ANNUALISATION_FACTOR = np.sqrt(config.TRADING_DAYS_PER_YEAR)
+
+
+# ---------------------------------------------------------------------------
+# Summary for the first screen
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BacktestSummary:
+    """The figures shown as headline metrics for one backtest."""
+
+    position: str
+    since: datetime.date | None
+    round_trips: int
+    fills: int
+    time_in_market: float
+    unadjusted_pnl: float
+
+
+def summarize_backtest(
+    df_trades: pd.DataFrame,
+    prices_window: pd.Series,
+    mtm_trade: dict[str, object] | None,
+    position_open: bool,
+) -> BacktestSummary:
+    """Summarize a trade log over its window. Accepts an empty log without ``pnl_usd``.
+
+    ``time_in_market`` is the fraction of window sessions in a long position, from
+    the fill date up to the session before the exit fill.
+    """
+    position = "Long" if position_open else "Flat"
+    if df_trades.empty:
+        return BacktestSummary(position, None, 0, 0, 0.0, 0.0)
+
+    fills = len(df_trades)
+    held = pd.Series(np.nan, index=prices_window.index)
+    held.loc[df_trades.index] = (df_trades["position"] == "buy").astype(float)
+    held = held.ffill().fillna(0.0)
+
+    realised = float(df_trades["pnl_usd"].sum())
+    open_pnl = float(str(mtm_trade["pnl_usd"])) if mtm_trade else 0.0
+
+    return BacktestSummary(
+        position=position,
+        since=pd.Timestamp(df_trades.index[-1]).date(),
+        round_trips=fills // 2,
+        fills=fills,
+        time_in_market=float(held.mean()),
+        unadjusted_pnl=realised + open_pnl,
+    )
 
 
 # ---------------------------------------------------------------------------

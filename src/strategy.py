@@ -1,13 +1,11 @@
 """
-Backtesting engine for commodity trading strategies.
+Backtesting engine for commodity trading rules.
 
-Supported strategies
---------------------
-``"ratio"``          — ratio-triggered outright (signal from a price ratio, single leg)
-``"mean_reversion"`` — Bollinger Bands
-``"momentum"``       — dual EMA crossover + RSI filter
-``"breakout"``       — channel breakout
-``"macd"``           — MACD line crossover
+Supported rules
+---------------
+``"tsmom_12m"`` - 12-month time-series momentum, checked at each month end
+``"donchian"``  - Donchian channel breakout (20-session entry, 10-session exit)
+``"buy_hold"``  - reference: long from the first fill to the window end
 
 Execution model
 ---------------
@@ -15,6 +13,11 @@ Signals are generated from the **close of day T** and executed at the
 **close of day T+1** (next-bar execution).  This avoids the look-ahead
 bias of same-bar execution, where the closing price that triggers the
 signal is simultaneously used as the fill price.
+
+Signals run on the instrument's own history up to the window end and are then
+sliced to the window. Using the instrument's own series keeps holidays of other
+markets out of the rolling windows, and using the history before the window
+means a short window does not start blind.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ from . import config
 # Public types
 # ---------------------------------------------------------------------------
 
-StrategyType = Literal["ratio", "mean_reversion", "momentum", "breakout", "macd"]
+StrategyType = Literal["tsmom_12m", "donchian", "buy_hold"]
 
 __all__ = [
     "BacktestError",
@@ -55,86 +58,51 @@ def backtest(
     end_date: datetime.date | str,
     df: pd.DataFrame,
     commodity_chosen: str,
-    commodity_ratio: str,
     tons_conversion: dict[str, float],
     contract_size: float,
     stop_loss_pct: float | None = None,
     take_profit_pct: float | None = None,
-    # ratio params
-    up_exit: float = 1.05,
-    down_entry: float = 0.95,
-    # mean_reversion params
-    bb_window: int = 20,
-    bb_std: float = 2.0,
-    # momentum params
-    fast_ma: int = 10,
-    slow_ma: int = 30,
-    rsi_period: int = 14,
-    rsi_oversold: float = 30.0,
-    rsi_overbought: float = 70.0,
-    # breakout params
-    lookback_period: int = 20,
-    breakout_threshold: float = 0.02,
-    # macd params
-    macd_fast: int = 12,
-    macd_slow: int = 26,
-    macd_signal: int = 9,
+    tsmom_lookback: int = 252,
+    donchian_entry: int = 20,
+    donchian_exit: int = 10,
 ) -> tuple[pd.DataFrame, bool]:
-    """Run a backtest for the given strategy over the specified date range.
+    """Run a backtest for the given rule over the specified date range.
 
     Returns
     -------
     df_trades:
-        Trade log with columns: trade_price, trade_ratio, position, quantity,
-        VaR_95.  Trade prices reflect **next-bar (T+1) execution**: the signal
-        fires on day T's close and the fill is recorded at day T+1's close.
+        Trade log with columns: trade_price, position, quantity, VaR_95.  Trade
+        prices reflect **next-bar (T+1) execution**: the signal fires on day T's
+        close and the fill is recorded at day T+1's close.
     position_open:
         True if the last signal is an unclosed long (open MTM position).
     """
     if commodity_chosen not in df.columns:
         raise BacktestError(f"Commodity '{commodity_chosen}' not found in price data.")
 
-    df_range = df.loc[str(start_date) : str(end_date)].copy()
+    history = df[commodity_chosen].loc[: str(end_date)].dropna()
 
-    if df_range.empty:
-        raise BacktestError(f"No price data between {start_date} and {end_date}.")
-
-    prices = df_range[commodity_chosen]
-
-    if backtest_strategy == "ratio":
-        if not commodity_ratio or commodity_ratio not in df.columns:
-            raise BacktestError(f"Ratio commodity '{commodity_ratio}' not found in data.")
-        signals = _ratio_signals(
-            df_range, commodity_chosen, commodity_ratio, tons_conversion, down_entry, up_exit
-        )
-        # Annotate full df with ratio for visualisation
-        f1 = tons_conversion[commodity_chosen]
-        f2 = tons_conversion[commodity_ratio]
-        df["ratio"] = (df[commodity_chosen] * f1) / (df[commodity_ratio] * f2)
-
-    elif backtest_strategy == "mean_reversion":
-        signals = _bollinger_signals(prices, bb_window, bb_std)
-
-    elif backtest_strategy == "momentum":
-        signals = _momentum_signals(
-            prices, fast_ma, slow_ma, rsi_period, rsi_oversold, rsi_overbought
-        )
-
-    elif backtest_strategy == "breakout":
-        signals = _breakout_signals(prices, lookback_period, breakout_threshold)
-
-    elif backtest_strategy == "macd":
-        signals = _macd_signals(prices, macd_fast, macd_slow, macd_signal)
-
+    if backtest_strategy == "tsmom_12m":
+        signals_full = _tsmom_signals(history, tsmom_lookback)
+    elif backtest_strategy == "donchian":
+        signals_full = _donchian_signals(history, donchian_entry, donchian_exit)
+    elif backtest_strategy == "buy_hold":
+        signals_full = _buy_hold_signals(history)
     else:
         raise BacktestError(f"Unknown strategy: '{backtest_strategy}'.")
+
+    prices = history.loc[str(start_date) :]
+    if prices.empty:
+        raise BacktestError(
+            f"No {commodity_chosen} price data between {start_date} and {end_date}."
+        )
+
+    signals = signals_full.reindex(prices.index).astype(int)
 
     return _build_trades(
         signals=signals,
         prices=prices,
-        df_range=df_range,
         commodity_chosen=commodity_chosen,
-        commodity_ratio=commodity_ratio,
         tons_conversion=tons_conversion,
         contract_size=contract_size,
         stop_loss_pct=stop_loss_pct,
@@ -143,106 +111,45 @@ def backtest(
 
 
 # ---------------------------------------------------------------------------
-# Public helpers
+# Signal generators (return an int Series of +1=buy, -1=sell, 0=hold)
 # ---------------------------------------------------------------------------
 
 
-def _compute_ratio(
-    df: pd.DataFrame,
-    commodity_chosen: str,
-    commodity_ratio: str,
-    tons_conversion: dict[str, float],
-) -> pd.Series:
-    """Return the metric-ton price ratio between two commodities."""
-    return (df[commodity_chosen] * tons_conversion[commodity_chosen]) / (
-        df[commodity_ratio] * tons_conversion[commodity_ratio]
-    )
+def _tsmom_signals(prices: pd.Series, lookback: int) -> pd.Series:
+    """Long when the price is above its level ``lookback`` sessions ago, at month ends.
+
+    Uses the price difference, not the ratio, so a negative price cannot flip the sign.
+    """
+    up = prices - prices.shift(lookback)
+    periods = pd.Series(pd.DatetimeIndex(prices.index).to_period("M"), index=prices.index)
+    month_end = periods != periods.shift(-1)
+    sig = pd.Series(0, index=prices.index, dtype=int)
+    sig[month_end & up.notna() & (up > 0)] = 1
+    sig[month_end & up.notna() & (up <= 0)] = -1
+    return sig
+
+
+def _donchian_signals(prices: pd.Series, entry: int, exit_: int) -> pd.Series:
+    """Long on a close above the prior ``entry`` high, flat on a close below the prior ``exit_`` low."""
+    upper = prices.rolling(entry).max().shift(1)
+    lower = prices.rolling(exit_).min().shift(1)
+    return (prices > upper).astype(int) - (prices < lower).astype(int)
+
+
+def _buy_hold_signals(prices: pd.Series) -> pd.Series:
+    """Always long: one fill at the first opportunity, never closed."""
+    return pd.Series(1, index=prices.index, dtype=int)
 
 
 # ---------------------------------------------------------------------------
-# Signal generators (return a Series of +1=buy, -1=sell, 0=hold)
-# ---------------------------------------------------------------------------
-
-
-def _ratio_signals(
-    df_range: pd.DataFrame,
-    commodity_chosen: str,
-    commodity_ratio: str,
-    tons_conversion: dict[str, float],
-    down_entry: float,
-    up_exit: float,
-) -> pd.Series:
-    f1 = tons_conversion[commodity_chosen]
-    f2 = tons_conversion[commodity_ratio]
-    ratio = (df_range[commodity_chosen] * f1) / (df_range[commodity_ratio] * f2)
-    df_range["ratio"] = ratio
-    buy_signal = (ratio < down_entry).astype(int)
-    sell_signal = (ratio > up_exit).astype(int)
-    return buy_signal - sell_signal  # +1 / -1 / 0
-
-
-def _bollinger_signals(prices: pd.Series, window: int, n_std: float) -> pd.Series:
-    ma = prices.rolling(window).mean()
-    std = prices.rolling(window).std()
-    lower = ma - n_std * std
-    upper = ma + n_std * std
-    buy_signal = (prices < lower).astype(int)
-    sell_signal = (prices > upper).astype(int)
-    return buy_signal - sell_signal
-
-
-def _momentum_signals(
-    prices: pd.Series,
-    fast_ma: int,
-    slow_ma: int,
-    rsi_period: int,
-    rsi_oversold: float,
-    rsi_overbought: float,
-) -> pd.Series:
-    fast = prices.ewm(span=fast_ma, adjust=False).mean()
-    slow = prices.ewm(span=slow_ma, adjust=False).mean()
-    rsi = _compute_rsi(prices, rsi_period)
-
-    # Buy when: fast MA above slow MA, RSI confirms momentum (above oversold)
-    # and is not yet overbought.
-    buy_signal = ((fast > slow) & (rsi > rsi_oversold) & (rsi < rsi_overbought)).astype(int)
-    sell_signal = ((fast < slow) | (rsi > rsi_overbought)).astype(int)
-    return buy_signal - sell_signal
-
-
-def _breakout_signals(prices: pd.Series, lookback: int, threshold: float) -> pd.Series:
-    resistance = prices.rolling(lookback).max().shift(1)
-    buy_signal = (prices > resistance * (1 + threshold)).astype(int)
-    sell_signal = (prices < resistance).astype(int)
-    return buy_signal - sell_signal
-
-
-def _macd_signals(prices: pd.Series, fast: int, slow: int, signal: int) -> pd.Series:
-    ema_fast = prices.ewm(span=fast, adjust=False).mean()
-    ema_slow = prices.ewm(span=slow, adjust=False).mean()
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-
-    buy_signal = ((macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))).astype(
-        int
-    )
-    sell_signal = ((macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))).astype(
-        int
-    )
-    return buy_signal - sell_signal
-
-
-# ---------------------------------------------------------------------------
-# State machine: convert raw signals → trade log
+# State machine: convert raw signals to a trade log
 # ---------------------------------------------------------------------------
 
 
 def _build_trades(
     signals: pd.Series,
     prices: pd.Series,
-    df_range: pd.DataFrame,
     commodity_chosen: str,
-    commodity_ratio: str,
     tons_conversion: dict[str, float],
     contract_size: float,
     stop_loss_pct: float | None,
@@ -282,19 +189,15 @@ def _build_trades(
     position_open = in_trade
 
     if not trade_idx:
-        empty = pd.DataFrame(
-            columns=["trade_price", "trade_ratio", "position", "quantity", "VaR_95"]
-        )
+        empty = pd.DataFrame(columns=["trade_price", "position", "quantity", "VaR_95"])
         empty.index.name = "date"
         return empty, False
 
-    idx_labels = df_range.index[trade_idx]
-    ratio_col = df_range.get("ratio", pd.Series(float("nan"), index=df_range.index))
+    idx_labels = prices.index[trade_idx]
 
     df_trades = pd.DataFrame(
         {
             "trade_price": prices.iloc[np.array(trade_idx)].values,
-            "trade_ratio": ratio_col.iloc[np.array(trade_idx)].values,
             "position": trade_type,
             "quantity": [1 if t == "buy" else -1 for t in trade_type],
         },
@@ -316,22 +219,3 @@ def _build_trades(
     df_trades["VaR_95"] = var_list
 
     return df_trades, position_open
-
-
-# ---------------------------------------------------------------------------
-# RSI helper — Wilder's exponential smoothing (industry standard)
-# ---------------------------------------------------------------------------
-
-
-def _compute_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
-    """Compute RSI using Wilder's exponential smoothing (alpha = 1/period).
-
-    This matches the implementation used by TA-Lib, Bloomberg, and TradingView.
-    The simple-rolling-average approximation produces materially different
-    values and miscalibrates overbought/oversold thresholds.
-    """
-    delta = prices.diff()
-    gain = delta.clip(lower=0).ewm(com=period - 1, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(com=period - 1, adjust=False).mean()
-    rs = gain / loss.replace(0, float("nan"))
-    return 100 - (100 / (1 + rs))

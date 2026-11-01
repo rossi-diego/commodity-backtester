@@ -13,6 +13,8 @@ from dataclasses import dataclass
 __all__ = [
     "CommoditySpec",
     "COMMODITIES",
+    "COMMODITY_UNITS",
+    "RATIO_PAIRS",
     "tickers",
     "commodities_dict",
     "contract_sizes",
@@ -55,6 +57,15 @@ COMMODITIES: dict[str, CommoditySpec] = {
 }
 
 commodities_dict: dict[str, str] = {t: s.name for t, s in COMMODITIES.items()}
+
+COMMODITY_UNITS: dict[str, str] = {s.name: s.unit for s in COMMODITIES.values()}
+
+RATIO_PAIRS: dict[str, tuple[str, str]] = {
+    "Soybean / Corn": ("Soybean", "Corn"),
+    "KC Wheat / Corn": ("KC HRW Wheat", "Corn"),
+    "Soy Oil / Soy Meal": ("Soybean Oil", "Soybean Meal"),
+    "Heating Oil / WTI": ("Heating Oil", "Crude Oil (WTI)"),
+}
 
 contract_sizes: dict[str, float] = {
     "Soybean": 136.08,
