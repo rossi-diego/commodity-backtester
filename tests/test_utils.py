@@ -411,3 +411,45 @@ class TestBacktestPerformance:
             f"Sortino should not be NaN (may be inf for strategies with no losing days), "
             f"got {sortino}"
         )
+
+
+class TestBacktestWindow:
+    def test_window_restriction_changes_sharpe(
+        self,
+        price_df: pd.DataFrame,
+        tons_conv: dict[str, float],
+        contract_sz: float,
+    ) -> None:
+        """Pre-window days must not enter the return series as zeros.
+
+        Padding the price calendar with flat history before the backtest starts
+        adds zero-return days, which shrinks Sharpe. The app passes only the
+        backtest window, so metrics computed on the window must differ from
+        metrics computed on a padded calendar.
+        """
+        df_trades, mtm, pos_open = _run_full(price_df, tons_conv, contract_sz)
+        if df_trades.empty:
+            pytest.skip("No trades generated.")
+        ic = _initial_capital(price_df, tons_conv, contract_sz)
+
+        pad_index = pd.date_range(
+            end=price_df.index[0] - pd.Timedelta(days=1), periods=750, freq="B"
+        )
+        padded = pd.concat(
+            [pd.DataFrame(index=pad_index, columns=price_df.columns, dtype=float), price_df]
+        )
+
+        def sharpe(prices: pd.DataFrame) -> float:
+            result = backtest_performance_extended(
+                df_trades=df_trades,
+                df_prices=prices,
+                mtm_trade=mtm,
+                contract_size=contract_sz,
+                tons_conversion=tons_conv,
+                commodity_chosen="Soybean",
+                position_open=pos_open,
+                initial_capital=ic,
+            )
+            return float(result.loc[result["Metric"] == "Sharpe Ratio", "Value"].iloc[0])
+
+        assert abs(sharpe(padded)) < abs(sharpe(price_df))

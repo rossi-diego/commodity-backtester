@@ -51,7 +51,7 @@ streamlit run app.py
 ```bash
 pip install -r requirements-dev.txt
 pytest          # run test suite
-ruff check src/ # lint
+ruff check src/ tests/ app.py # lint
 mypy src/       # type-check
 ```
 
@@ -74,6 +74,7 @@ commodity-backtester/
 │   ├── conftest.py             # Shared fixtures (synthetic price data, no network)
 │   ├── test_strategy.py        # Signal generation, T+1 execution, RSI, all strategies
 │   ├── test_utils.py           # PnL correctness (CME-verified), Sharpe/Calmar finite
+│   ├── test_data_loader.py     # Parquet cache and Yahoo Finance error handling (mocked)
 │   └── test_constants.py       # Contract reference data integrity
 ├── .github/workflows/ci.yml    # CI: lint → typecheck → test
 ├── pyproject.toml              # Ruff, mypy, pytest configuration
