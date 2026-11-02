@@ -23,6 +23,7 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | Is crushing paying well or badly now? | Crush margin, with its rank against the past 5 years and this year drawn over the monthly range of the five previous years | USD per tonne of soybeans |
 | How much of the value is oil? | Oil share of the product value, and meal and oil value against the soybean cost | % and USD per tonne |
 | What does the oil in biodiesel cost next to diesel? | The soybean oil needed for 1 m³ of biodiesel against 1 m³ of heating oil, and the gap between them. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
+| How much of that gap does the RIN credit pay? | The D4 RIN value per m³ of biodiesel, and the gap after it | USD per m³ |
 
 Every number on the page states its date and unit. The page opens on the latest data with no button to press.
 
@@ -34,10 +35,14 @@ Every number on the page states its date and unit. The page opens on the latest 
 | Oil share | oil value / (oil value + meal value) | Derived |
 | Feedstock cost | 0.90 t of soybean oil per m³ of biodiesel × oil in USD per tonne | EIA plant data, 2017 to 2020, average 7.50 lb per gallon, which is 0.899 t per m³ ([farmdoc daily](https://farmdocdaily.illinois.edu/wp-content/uploads/2022/02/fdd021622.pdf)) |
 | Oil cost vs diesel | feedstock cost − heating oil, in USD per m³ | NYMEX heating oil stands in for diesel. The industry quotes the same comparison per gallon as the BOHO spread |
+| RIN value | 1.5 D4 RINs per gallon × 264.17 gallons per m³ × weekly D4 price | Equivalence value of biodiesel ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)); weekly volume-weighted D4 prices from EMTS transactions ([EPA](https://www.epa.gov/fuels-registration-reporting-and-compliance-help/rin-trades-and-price-information)) |
+| Gap after the RIN | oil cost vs diesel − RIN value | Each weekly price is used for the sessions of its week and the next, never stretched further |
 
 Unit conversions use the exact definitions (1 lb = 0.45359237 kg, 1 US gallon = 3.785411784 L) and are tested in `tests/test_constants.py`.
 
 On 2026-10-27 the crush margin was 88.43 USD/t (2.41 USD/bu), oil was 50% of the product value, and soybean oil cost 1,324 USD per m³ of biodiesel against 1,262 USD/m³ for heating oil. `tests/test_margins.py` asserts these figures from that day's closes.
+
+With the D4 RIN at 2.09 USD in the week of 2026-09-21, the credit is worth about 829 USD per m³ of biodiesel. In yearly averages the gap before the credit was +236 USD/m³ in 2024 and +366 in 2025, and after it −66 and −3: the RIN price moves to close the feedstock gap, as the theory of the credit predicts.
 
 ## Rolls and delivery
 
@@ -47,6 +52,12 @@ Yahoo Finance's continuous `=F` series stay in the nearest contract until its la
 
 From mid-September to mid-December the front months are not the board crush pair: November beans trade against October, then December, products, and January beans against December products. Those sessions are kept, because their daily changes match clean sessions (median 0.86 against 0.89 USD/t), but their level includes a product calendar spread.
 
+## D4 RIN prices
+
+EPA publishes weekly volume-weighted average prices of separated RINs, from EMTS transactions, in a public Qlik Sense app on its [RIN Trades and Price Information](https://www.epa.gov/fuels-registration-reporting-and-compliance-help/rin-trades-and-price-information) page, with no file to download. `src/rins.py` reads the D4 series through the same engine API the page uses, validates it against EPA's own D4 outlier filter (0.05 to 3.00 USD) and the saved series, and caches it. If EPA cannot be reached or the response fails validation, the app uses the dated copy in `data/seed/epa_d4_rin_weekly.csv` and says so on the page.
+
+EPA reloads the data monthly, so the latest RIN price lags the futures by several weeks. The page always prints the RIN week next to the RIN value.
+
 ## What it leaves out
 
 These are deliberate limits for a project built on free data. A production desk would add each one.
@@ -54,7 +65,9 @@ These are deliberate limits for a project built on free data. A production desk 
 | Left out | Why it matters |
 |---|---|
 | Plant costs, energy, freight, local basis | The page shows a gross board margin, not plant profit |
-| Biofuel credits and mandates (RINs, LCFS, 45Z) | They often decide biodiesel profitability, and need paid or policy data |
+| The 45Z and LCFS credits | They can decide biodiesel profitability, and depend on carbon intensity and state rules |
+| Who keeps the RIN | The RIN goes to whoever blends the fuel, so a producer earns it only through the price of biodiesel |
+| Daily RIN prices | Daily assessments (Argus, OPIS, Fastmarkets) are paid; the EPA series is weekly and published monthly |
 | Energy content | Biodiesel holds about 7% less energy than diesel per unit of volume ([AFDC](https://afdc.energy.gov/fuels/properties)); the gap compares volumes |
 | The forward curve | Only the front month is free with history, so there is no forward crush yet |
 | Exchange holidays | Calendars use business days, so a flag can be one session off around a holiday |
@@ -62,7 +75,7 @@ These are deliberate limits for a project built on free data. A production desk 
 ## Architecture
 
 ```
-Yahoo Finance: ZS=F, ZM=F, ZL=F, HO=F (daily closes from 2000)
+Yahoo Finance: ZS=F, ZM=F, ZL=F, HO=F (daily closes from 2000)      EPA: weekly D4 RIN prices (from 2010)
    |  validated per column, written atomically, falls back to the cache on failure
    v
 data/prices.parquet  (local, git-ignored)
@@ -70,6 +83,7 @@ data/prices.parquet  (local, git-ignored)
    v
 src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg drops the session
 src/rolls.py     contract calendars: delivery and switch flags
+src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
 src/seasonal.py  latest clean reading, 5-year percentile, monthly range of the five previous years
    |
    v
@@ -107,11 +121,13 @@ soybean-crush-margin/
 ├── app.py                      # Streamlit page only
 ├── .streamlit/config.toml      # Dark theme
 ├── docs/screenshot.png         # README screenshot
+├── data/seed/                  # Dated copy of the EPA D4 RIN series, the fallback
 ├── src/
 │   ├── config.py               # Paths and cache settings
 │   ├── constants.py            # Tickers, units, crush and biodiesel factors with sources
 │   ├── data_loader.py          # Yahoo Finance fetch, response validation, Parquet cache
 │   ├── rolls.py                # Contract calendars, delivery and switch flags
+│   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
 │   ├── seasonal.py             # Percentile rank and monthly range on clean sessions
 │   └── visualization.py        # Plotly figure builders, no UI imports

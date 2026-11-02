@@ -9,11 +9,12 @@ import streamlit as st
 
 from src.constants import BUSHELS_PER_TONNE
 from src.data_loader import LoadResult, load_prices
-from src.margins import crush_table, gap_table
+from src.margins import add_rins, crush_table, gap_table, rin_per_m3
+from src.rins import EPA_PAGE, RinResult, load_d4
 from src.seasonal import Reading, latest_reading, monthly_band
 from src.visualization import (
-    INK_SERIES,
     feedstock_figure,
+    gap_figure,
     history_figure,
     oil_share_figure,
     seasonal_figure,
@@ -27,6 +28,9 @@ LINKEDIN_URL = "https://www.linkedin.com/in/rossi-diego/"
 CME_GUIDE_URL = "https://www.cmegroup.com/education/files/soybean-crush-reference-guide.pdf"
 FARMDOC_URL = "https://farmdocdaily.illinois.edu/wp-content/uploads/2022/02/fdd021622.pdf"
 AFDC_URL = "https://afdc.energy.gov/fuels/properties"
+EQUIVALENCE_URL = (
+    "https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415"
+)
 WINDOWS = ["5Y", "10Y", "All"]
 DEFAULT_WINDOW = "10Y"
 
@@ -120,10 +124,10 @@ DATA_SOURCE = (
 )
 
 WARNING = (
-    "**Gross margins, before costs and credits.** Processing, energy, freight and local basis "
-    "are not deducted, and biofuel credits (RINs, LCFS, 45Z) are not added, though they often "
-    "decide real profits. Sessions in a roll or delivery window are drawn grey and left out of "
-    "every statistic."
+    "**Gross margins, before costs.** Processing, energy, freight and local basis are not "
+    "deducted. Of the biofuel credits, only the D4 RIN is shown, beside the oil cost; 45Z and "
+    "LCFS are not, though they can decide real profits. Sessions in a roll or delivery window "
+    "are drawn grey and left out of every statistic."
 )
 LOAD_ERROR = (
     "Prices could not be loaded from Yahoo Finance and no saved copy is available. "
@@ -153,7 +157,11 @@ FEEDSTOCK_RAIL = (
     f"biodiesel holds about 7% less energy than diesel ([AFDC]({AFDC_URL})), so biodiesel costs "
     "more to make than this gap shows. Blending mandates and credits pay the difference.\n\n"
     "A higher gap means dearer feedstock. A lower one means soybean oil is cheap as a fuel, "
-    "which pulls its demand toward biodiesel."
+    "which pulls its demand toward biodiesel.\n\n"
+    "**D4 RIN:** the US credit biodiesel earns under the Renewable Fuel Standard, 1.5 per "
+    "gallon. Refiners must buy them to comply, so the credit adds to what biodiesel is worth. "
+    "**Blue line:** the gap after that credit. Prices are EPA weekly averages, published "
+    "monthly, so they lag the futures by weeks."
 )
 METHOD_FORMULA = (
     "## How it is calculated\n\n"
@@ -161,7 +169,10 @@ METHOD_FORMULA = (
     "The yields are the CME board crush convention, 44 lb of meal and 11 lb of oil per 60 lb "
     "bushel; in CME units it is 0.022 × meal + 0.11 × oil − soybeans, in USD per bushel "
     f"([CME guide]({CME_GUIDE_URL})). **Feedstock cost** = 0.90 t of oil per m³ of biodiesel, "
-    f"from EIA plant data averaging 7.5 lb per gallon ([farmdoc daily]({FARMDOC_URL}))."
+    f"from EIA plant data averaging 7.5 lb per gallon ([farmdoc daily]({FARMDOC_URL})). "
+    "**RIN value** = 1.5 D4 RINs per gallon "
+    f"([40 CFR 80.1415]({EQUIVALENCE_URL})) × 264.17 gallons per m³ × the weekly D4 price "
+    f"([EPA]({EPA_PAGE})), used for the sessions of its week and the next."
 )
 METHOD_ROLLS = (
     "## Rolls and delivery\n\n"
@@ -175,8 +186,9 @@ METHOD_ROLLS = (
 )
 METHOD_LIMITS = (
     "## What it leaves out\n\n"
-    "Plant running costs, energy, freight and local basis; biofuel credits and blending "
-    "mandates; later contracts on the curve. Prices are unadjusted futures closes, and the "
+    "Plant running costs, energy, freight and local basis; the 45Z and LCFS credits; who keeps "
+    "the RIN, which goes to whoever blends the fuel; later contracts on the curve. Prices are "
+    "unadjusted futures closes, and the "
     "contract calendars ignore exchange holidays, so a flag can be one session off. "
     f"[Source and known issues]({REPOSITORY_URL})."
 )
@@ -185,6 +197,11 @@ METHOD_LIMITS = (
 @st.cache_data(ttl=3600, show_spinner="Loading prices")
 def _load_prices() -> LoadResult:
     return load_prices()
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner="Loading RIN prices")
+def _load_rins() -> RinResult:
+    return load_d4()
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +259,23 @@ def _share_years_before(table: pd.DataFrame, date: pd.Timestamp, years: int) -> 
 def _kpi(key: str, label: str, value: str, delta: str, caption: str) -> None:
     with st.container(key=f"card-kpi-{key}"):
         st.metric(label, value, delta=delta, **METRIC_STYLE)
-        st.caption(caption)
+        st.caption(caption.replace("$", "\\$"))
 
 
-def _summary(crush: Reading, share: Reading | None, gap: Reading | None) -> None:
+def _after_rin(gap: Reading | None, rins: RinResult) -> float | None:
+    """Gap at the latest clean session minus the latest published D4 RIN, per m3."""
+    if gap is None or rins.prices is None:
+        return None
+    return gap.value - float(rin_per_m3(float(rins.prices.iloc[-1])))
+
+
+def _summary(crush: Reading, share: Reading | None, gap: Reading | None, rins: RinResult) -> None:
+    after = _after_rin(gap, rins)
+    gap_caption = (
+        "Not the biodiesel price: processing comes on top."
+        if after is None
+        else f"After the D4 RIN credit: {_usd(after, 'm³', signed=True)}."
+    )
     left, right = st.container(key="readrow").columns([3, 2], gap="small", vertical_alignment="top")
     with left, st.container(key="kpis", horizontal=True, gap="small"):
         _kpi(
@@ -274,7 +304,7 @@ def _summary(crush: Reading, share: Reading | None, gap: Reading | None) -> None
             "Oil cost vs diesel",
             "n/a" if gap is None else _usd(gap.value, "m³", signed=True),
             "per m³ of biodiesel, oil only",
-            "Not the biodiesel price: processing comes on top.",
+            gap_caption,
         )
     with right:
         st.warning(WARNING, icon=":material/info:")
@@ -339,14 +369,28 @@ def _gap_reading(gap: Reading) -> str:
     return f", so soybean oil is unusually {'cheap' if cheap else 'dear'} against diesel"
 
 
-def _feedstock_section(table: pd.DataFrame, gap: Reading, window: str) -> None:
+def _rin_clause(gap: Reading, rins: RinResult) -> str:
+    after = _after_rin(gap, rins)
+    if after is None or rins.prices is None:
+        return " D4 RIN prices could not be loaded, so the credit is not shown."
+    price = float(rins.prices.iloc[-1])
+    side = "more" if after >= 0 else "less"
+    saved = ", saved copy" if rins.source == "seed" else ""
+    return (
+        f" The latest D4 RIN, ${price:,.2f} in the week of {rins.as_of} (EPA{saved}), is worth "
+        f"{_usd(float(rin_per_m3(price)), 'm³')} of biodiesel; after it, the oil costs "
+        f"{_usd(abs(after), 'm³')} {side} than diesel."
+    )
+
+
+def _feedstock_section(table: pd.DataFrame, gap: Reading, rins: RinResult, window: str) -> None:
     row = table.loc[gap.date]
     side = "more" if gap.value >= 0 else "less"
     head = (
         f"**The soybean oil in 1 m³ of biodiesel costs {_usd(row['feedstock'], 'm³')} on "
         f"{gap.date.date()}, {_usd(abs(gap.value), 'm³')} {side} than 1 m³ of heating oil.** "
         f"That is the feedstock alone, not the biodiesel price. The gap is {_rank_clause(gap)}"
-        f"{_gap_reading(gap)}.{_older_note(gap)}"
+        f"{_gap_reading(gap)}.{_rin_clause(gap, rins)}{_older_note(gap)}"
     )
     shown = _window(table, window)
     with st.container(key="row-feedstock"):
@@ -357,15 +401,7 @@ def _feedstock_section(table: pd.DataFrame, gap: Reading, window: str) -> None:
             st.plotly_chart(
                 feedstock_figure(shown), width="stretch", key="feedstock_chart", theme=None
             )
-            gap_chart = history_figure(
-                shown["gap"],
-                shown["flagged"],
-                "Gap, USD per m³",
-                color=INK_SERIES,
-                name="Soy oil minus heating oil",
-                height=220,
-            )
-            st.plotly_chart(gap_chart, width="stretch", key="gap_chart", theme=None)
+            st.plotly_chart(gap_figure(shown), width="stretch", key="gap_chart", theme=None)
         with rail, st.container(key="card-rail-feedstock"):
             st.markdown(FEEDSTOCK_RAIL)
 
@@ -389,11 +425,14 @@ def _data_line(loaded: LoadResult) -> str:
     return f"{DATA_SOURCE}, 2000 to {loaded.as_of}{freshness}."
 
 
-def _footer(loaded: LoadResult) -> None:
+def _footer(loaded: LoadResult, rins: RinResult | None = None) -> None:
     data = ""
     if loaded.prices is not None:
         freshness = " (may be out of date)" if loaded.is_stale else ""
         data = f"Data to {loaded.as_of}{freshness}. "
+    if rins is not None and rins.prices is not None:
+        saved = ", saved copy" if rins.source == "seed" else ""
+        data += f"D4 RIN prices from EPA to the week of {rins.as_of}{saved}. "
     st.caption(
         f"{data}Personal project, not affiliated with any employer. Not investment advice. "
         f"[Source code]({REPOSITORY_URL})"
@@ -433,11 +472,12 @@ def main() -> None:
         _footer(loaded)
         return
 
-    gap = gap_table(loaded.prices)
+    rins = _load_rins()
+    gap = add_rins(gap_table(loaded.prices), rins.prices)
     share_reading = latest_reading(crush["oil_share"], crush["flagged"])
     gap_reading = latest_reading(gap["gap"], gap["flagged"])
 
-    _summary(crush_reading, share_reading, gap_reading)
+    _summary(crush_reading, share_reading, gap_reading, rins)
     window = st.segmented_control(
         "History window for the charts below",
         WINDOWS,
@@ -454,9 +494,9 @@ def main() -> None:
             icon=":material/warning:",
         )
     else:
-        _feedstock_section(gap, gap_reading, window)
+        _feedstock_section(gap, gap_reading, rins, window)
     _method()
-    _footer(loaded)
+    _footer(loaded, rins)
 
 
 main()

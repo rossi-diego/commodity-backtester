@@ -7,7 +7,15 @@ import pandas as pd
 import pytest
 
 from src.constants import BEANS, BUSHELS_PER_TONNE, DIESEL, MEAL, OIL
-from src.margins import CRUSH_COLUMNS, GAP_COLUMNS, crush_table, gap_table, to_metric
+from src.margins import (
+    CRUSH_COLUMNS,
+    GAP_COLUMNS,
+    add_rins,
+    crush_table,
+    gap_table,
+    rin_per_m3,
+    to_metric,
+)
 
 # Closes on 2026-10-27, in exchange units.
 CLOSE = {BEANS: 1229.25, MEAL: 334.6, OIL: 66.71, DIESEL: 4.7752}
@@ -74,3 +82,27 @@ class TestMetric:
         metric = to_metric(_frame({OIL: [50.0]}))
         assert list(metric.columns) == ["oil"]
         assert metric["oil"].iloc[0] == pytest.approx(1102.31, rel=1e-5)
+
+
+class TestRins:
+    def test_value_per_m3_is_1_5_rins_per_gallon(self) -> None:
+        assert rin_per_m3(2.0915) == pytest.approx(1.5 * 264.172 * 2.0915, rel=1e-5)
+        assert rin_per_m3(2.0915) == pytest.approx(828.8, abs=0.1)
+
+    def test_each_session_takes_its_week_and_no_further(self) -> None:
+        sessions = pd.bdate_range("2026-09-21", "2026-10-09")
+        table = pd.DataFrame({"gap": 100.0, "flagged": False}, index=sessions)
+        d4 = pd.Series([2.0], index=pd.DatetimeIndex(["2026-09-21"]))
+        out = add_rins(table, d4)
+        within = out.loc[:"2026-10-04"]
+        assert within["rin_value"].notna().all()
+        assert out.loc["2026-10-05":, "rin_value"].isna().all()
+        assert within["after_rin"].iloc[0] == pytest.approx(100.0 - rin_per_m3(2.0))
+
+    def test_without_rins_the_columns_are_empty(self) -> None:
+        table = pd.DataFrame(
+            {"gap": [1.0], "flagged": [False]}, index=pd.DatetimeIndex(["2026-01-05"])
+        )
+        out = add_rins(table, None)
+        assert out["rin_value"].isna().all()
+        assert out["after_rin"].isna().all()
