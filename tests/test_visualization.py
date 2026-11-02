@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.margins import crush_table, gap_table
+from src.margins import add_rins, crush_table, gap_table
 from src.seasonal import REFERENCE_YEAR, monthly_band
 from src.visualization import (
     AXIS,
@@ -21,6 +21,7 @@ from src.visualization import (
     OIL,
     SURFACE,
     feedstock_figure,
+    gap_figure,
     history_figure,
     oil_share_figure,
     seasonal_figure,
@@ -33,7 +34,9 @@ HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
 
 @pytest.fixture(scope="module")
 def tables(synthetic_prices) -> tuple[pd.DataFrame, pd.DataFrame]:
-    return crush_table(synthetic_prices), gap_table(synthetic_prices)
+    gap = gap_table(synthetic_prices)
+    d4 = pd.Series(1.5, index=pd.date_range("2010-07-05", gap.index[-1], freq="W-MON"))
+    return crush_table(synthetic_prices), add_rins(gap, d4)
 
 
 def _trace(fig, name: str):
@@ -57,6 +60,7 @@ def _figures(tables) -> list:
         oil_share_figure(crush),
         feedstock_figure(gap),
         history_figure(gap["gap"], gap["flagged"], "Gap", color=INK_SERIES),
+        gap_figure(gap),
     ]
 
 
@@ -89,6 +93,24 @@ class TestHistory:
         dot = _trace(fig, "Latest clean session")
         clean = crush.loc[~crush["flagged"], "crush"]
         assert dot.y[0] == pytest.approx(clean.iloc[-1])
+
+
+class TestGap:
+    def test_before_and_after_the_rin(self, tables) -> None:
+        _, gap = tables
+        fig = gap_figure(gap)
+        after = np.asarray(_trace(fig, "After the D4 RIN").y, dtype=float)
+        before = np.asarray(_trace(fig, "Before the RIN").y, dtype=float)
+        clean = ~gap["flagged"].to_numpy()
+        assert np.allclose(
+            before[clean] - after[clean], gap["rin_value"].to_numpy()[clean], equal_nan=True
+        )
+        assert _trace(fig, "After the D4 RIN").line.color == OIL
+
+    def test_no_rin_line_without_rins(self, tables) -> None:
+        _, gap = tables
+        fig = gap_figure(add_rins(gap.drop(columns=["rin_value", "after_rin"]), None))
+        assert "After the D4 RIN" not in [trace.name for trace in fig.data]
 
 
 class TestColour:

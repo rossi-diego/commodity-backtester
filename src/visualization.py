@@ -11,6 +11,7 @@ from .seasonal import REFERENCE_YEAR, to_reference_year
 
 __all__ = [
     "feedstock_figure",
+    "gap_figure",
     "history_figure",
     "oil_share_figure",
     "seasonal_figure",
@@ -99,6 +100,21 @@ def history_figure(
     return fig
 
 
+def gap_figure(table: pd.DataFrame, height: int = 260) -> go.Figure:
+    """Oil cost minus heating oil, before and after the D4 RIN credit, on clean sessions."""
+    flags = table["flagged"].reindex(table.index, fill_value=True).astype(bool)
+    fig = go.Figure()
+    fig.add_trace(_line(table.index, table["gap"], "Roll or delivery", FLAT, 1, hover=False))
+    fig.add_trace(_line(table.index, table["gap"].where(~flags), "Before the RIN", INK_SERIES, 1.5))
+    if table["after_rin"].notna().any():
+        after = table["after_rin"].where(~flags)
+        fig.add_trace(_line(table.index, after, "After the D4 RIN", OIL, 1.75))
+    fig.update_layout(**_layout(height))
+    fig.update_xaxes(range=[table.index[0], table.index[-1]])
+    fig.update_yaxes(title="Oil minus heating oil, USD per m³", zeroline=True, zerolinecolor=AXIS)
+    return fig
+
+
 def value_figure(table: pd.DataFrame) -> go.Figure:
     """Meal value, oil value and soybean cost, per tonne of soybeans crushed."""
     fig = go.Figure()
@@ -133,7 +149,7 @@ def feedstock_figure(table: pd.DataFrame) -> go.Figure:
     fig.add_trace(_line(table.index, table["feedstock"], "Soybean oil feedstock", OIL, 1.75))
     fig.update_layout(**_layout(MAIN_HEIGHT))
     fig.update_xaxes(range=[table.index[0], table.index[-1]])
-    fig.update_yaxes(title="USD per m3")
+    fig.update_yaxes(title="USD per m³")
     return fig
 
 

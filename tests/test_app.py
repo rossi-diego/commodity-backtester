@@ -44,6 +44,14 @@ def _cached_app(monkeypatch, tmp_path, frame: pd.DataFrame):
     return _new_app()
 
 
+@pytest.fixture(autouse=True)
+def no_rin_network(tmp_path, monkeypatch):
+    """EPA is never called in tests: the page reads the saved D4 copy in the repository."""
+    monkeypatch.setattr(config, "RIN_CACHE", tmp_path / "rin.csv")
+    with patch("src.rins._fetch_rows", side_effect=OSError("offline")):
+        yield
+
+
 @pytest.fixture()
 def app(tmp_path, monkeypatch, synthetic_prices):
     """The app on a synthetic cache that is a hit, so nothing may touch the network.
@@ -111,6 +119,22 @@ class TestFirstLoad:
         for block in [*app.markdown, *app.warning, *app.caption]:
             assert not re.search(r"(?<!\\)\$", block.value), block.value
 
+    def test_rin_credit_is_shown_with_its_date_and_source(self, app) -> None:
+        app.run()
+        seed = pd.read_csv(config.RIN_SEED)
+        week, price = seed["week"].iloc[-1], seed["usd_per_rin"].iloc[-1]
+        head = next(block.value for block in app.markdown if "soybean oil in 1 m³" in block.value)
+        assert f"latest D4 RIN, \\${price:,.2f} in the week of {week} (EPA, saved copy)" in head
+        assert "After the D4 RIN credit" in app.caption[3].value
+        assert f"D4 RIN prices from EPA to the week of {week}, saved copy." in app.caption[-1].value
+
+    def test_page_works_without_any_rin_data(self, app, monkeypatch, tmp_path) -> None:
+        monkeypatch.setattr(config, "RIN_SEED", tmp_path / "missing.csv")
+        app.run()
+        _no_exceptions(app)
+        assert any("credit is not shown" in block.value for block in app.markdown)
+        assert "Not the biodiesel price" in app.caption[3].value
+
     def test_gap_is_never_presented_as_a_biodiesel_price(self, app) -> None:
         app.run()
         head = next(block.value for block in app.markdown if "soybean oil in 1 m³" in block.value)
@@ -121,7 +145,7 @@ class TestFirstLoad:
     def test_warning_names_what_is_left_out(self, app) -> None:
         app.run()
         warning = app.warning[0].value
-        for text in ("before costs and credits", "RINs", "basis", "roll or delivery"):
+        for text in ("before costs", "D4 RIN", "45Z", "basis", "roll or delivery"):
             assert text in warning
 
     def test_window_changes_the_history(self, app) -> None:
