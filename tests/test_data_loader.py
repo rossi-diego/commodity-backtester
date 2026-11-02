@@ -35,7 +35,9 @@ def _fake_cached_df(start: str = "1999-01-04", end: str = "2021-12-31") -> pd.Da
     """Return an already-renamed cache DataFrame (display-name columns)."""
     dates = pd.date_range(start, end, freq="B")
     n = len(dates)
-    df = pd.DataFrame({"Soybean": [500.0] * n, "Corn": [400.0] * n}, index=pd.to_datetime(dates))
+    df = pd.DataFrame(
+        {"Soybean": [500.0] * n, "Soybean Meal": [400.0] * n}, index=pd.to_datetime(dates)
+    )
     df.index.name = "date"
     return df
 
@@ -185,7 +187,7 @@ class TestColdResponse:
     def test_cold_response_with_real_column_starts_is_accepted(self, cache_file):
         """Regression: real columns start up to 264 days after 2000-01-01, and that must pass."""
         response = _full_cached_df("2000-01-03", "2024-06-28")
-        for offset, name in zip([74, 135, 198, 235, 244, 258, 264], NAMES, strict=True):
+        for offset, name in zip([74, 198, 244, 264], NAMES, strict=True):
             cutoff = pd.Timestamp("2000-01-01") + pd.Timedelta(days=offset)
             response.loc[response.index < cutoff, name] = np.nan
 
@@ -203,23 +205,25 @@ class TestColdResponse:
     def test_cold_response_column_ending_early_is_rejected(self, cache_file):
         """Without this, every cold boot could show a stale market under a current date."""
         response = _full_cached_df("2000-03-15", "2024-06-28")
-        response.loc[response.index > "2023-08-31", "Corn"] = np.nan
+        response.loc[response.index > "2023-08-31", "Soybean Meal"] = np.nan
 
-        with pytest.raises(DataLoaderError, match="Corn ends before the rest of the response"):
+        with pytest.raises(
+            DataLoaderError, match="Soybean Meal ends before the rest of the response"
+        ):
             _refresh_with(response)
         assert not cache_file.exists()
 
     def test_cold_response_with_a_holiday_gap_at_the_end_is_accepted(self, cache_file):
         """A market closed for the last sessions is normal, within the stale slack."""
         response = _full_cached_df("2000-03-15", "2024-06-28")
-        response.loc[response.index > "2024-06-26", "Corn"] = np.nan
+        response.loc[response.index > "2024-06-26", "Soybean Meal"] = np.nan
 
         _refresh_with(response)
         assert cache_file.exists()
 
     def test_cold_response_missing_column_is_rejected(self, cache_file):
-        response = _full_cached_df("2000-03-15", "2024-06-28").drop(columns="Corn")
-        with pytest.raises(DataLoaderError, match="Corn has no values"):
+        response = _full_cached_df("2000-03-15", "2024-06-28").drop(columns="Soybean Meal")
+        with pytest.raises(DataLoaderError, match="Soybean Meal has no values"):
             _refresh_with(response)
         assert not cache_file.exists()
 
@@ -255,7 +259,7 @@ class TestWarmResponse:
     def test_column_ending_early_keeps_cache(self, cache_file, stale_cache):
         response = _extended(stale_cache)
         cutoff = stale_cache.index[-1] - pd.DateOffset(months=10)
-        response.loc[response.index > cutoff, "Corn"] = np.nan
+        response.loc[response.index > cutoff, "Soybean Meal"] = np.nan
         self._assert_rejected(cache_file, stale_cache, response)
 
     def test_frame_ending_early_keeps_cache(self, cache_file, stale_cache):
@@ -311,17 +315,17 @@ class TestImperfectCache:
         return _response_problems(response, cached, datetime.date(2000, 1, 1))
 
     def test_column_missing_from_cache_does_not_raise(self):
-        cached = _full_cached_df().drop(columns="Corn")
+        cached = _full_cached_df().drop(columns="Soybean Meal")
         assert self._problems(cached, _extended(_full_cached_df())) == []
 
     def test_all_nan_column_in_cache_does_not_raise(self):
         cached = _full_cached_df()
-        cached["Corn"] = np.nan
+        cached["Soybean Meal"] = np.nan
         assert self._problems(cached, _extended(_full_cached_df())) == []
 
     def test_constraints_still_apply_to_other_columns(self):
         cached = _full_cached_df()
-        cached["Corn"] = np.nan
+        cached["Soybean Meal"] = np.nan
         response = _extended(_full_cached_df())
         response["Soybean"] = np.nan
         assert self._problems(cached, response) == ["Soybean has no values"]
@@ -329,14 +333,14 @@ class TestImperfectCache:
     def test_good_response_repairs_poisoned_cache(self, cache_file):
         """A cache with an empty column is replaced end to end, without an exception."""
         poisoned = _full_cached_df()
-        poisoned["Corn"] = np.nan
+        poisoned["Soybean Meal"] = np.nan
         poisoned.to_parquet(cache_file)
 
         df, mock_dl = _refresh_with(_extended(_full_cached_df()))
 
         mock_dl.assert_called_once()
-        assert df["Corn"].notna().all()
-        assert pd.read_parquet(cache_file)["Corn"].notna().all()
+        assert df["Soybean Meal"].notna().all()
+        assert pd.read_parquet(cache_file)["Soybean Meal"].notna().all()
 
 
 # ---------------------------------------------------------------------------

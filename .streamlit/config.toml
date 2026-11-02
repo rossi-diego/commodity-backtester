@@ -3,7 +3,7 @@ toolbarMode = "minimal"
 
 [theme]
 base = "dark"
-primaryColor = "#c58512"
+primaryColor = "#eef2f6"
 backgroundColor = "#0b1016"
 secondaryBackgroundColor = "#141b23"
 textColor = "#eef2f6"
@@ -18,4 +18,4 @@ baseRadius = "6px"
 buttonRadius = "6px"
 showWidgetBorder = true
 paddingTop = "1rem"
-chartCategoricalColors = ["#c58512", "#4d8fe8", "#7d8796"]
+chartCategoricalColors = ["#c58512", "#4d8fe8", "#c76fae"]

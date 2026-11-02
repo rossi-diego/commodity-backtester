@@ -1,35 +1,16 @@
-"""
-Configuration module for the Commodity Backtester application.
-
-This module centralizes all configuration paths and constants used throughout
-the application, following the single source of truth principle.
-"""
+"""Paths and data settings for the Soybean Crush Margin app, in one place."""
 
 from pathlib import Path
 from typing import Final
 
-# =============================================================================
-# Directory Configuration
-# =============================================================================
-
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 DATA_DIR: Final[Path] = PROJECT_ROOT / "data"
-
-# Create the data directory if it doesn't exist
 DATA_DIR.mkdir(exist_ok=True)
 
-# =============================================================================
-# Data File Paths
-# =============================================================================
+# Parquet cache of daily closes. Git-ignored, rebuilt from Yahoo Finance when stale.
+YFINANCE_RAW: Final[Path] = DATA_DIR / "prices.parquet"
 
-YFINANCE_RAW: Final[Path] = DATA_DIR / "yfinance_raw.parquet"
-
-# =============================================================================
-# Application Settings
-# =============================================================================
-
-# Default date range for data fetching (25-year window gives statistically
-# meaningful drawdown and regime coverage across full commodity cycles)
+# First requested date. The crush legs all start trading on Yahoo in early 2000.
 DEFAULT_START_DATE: Final[str] = "2000-01-01"
 
 # Slack between the first cached date and the requested start. The first date in
@@ -43,14 +24,3 @@ COLUMN_START_SLACK_DAYS: Final[int] = 365
 # Days without a new close before the cache is refreshed and the data is labelled
 # as possibly out of date. Covers weekends and exchange holidays.
 CACHE_STALE_AFTER_DAYS: Final[int] = 5
-
-# VaR confidence level
-VAR_CONFIDENCE_LEVEL: Final[float] = 0.95
-
-# Trading days per year (for annualized metrics)
-TRADING_DAYS_PER_YEAR: Final[int] = 252
-
-# Annualised risk-free rate used in Sharpe / Sortino (0.0 = no adjustment).
-# For commodity futures the risk-free component is embedded in the futures basis;
-# set to e.g. 0.04 (4 %) to compute true excess-return Sharpe.
-RISK_FREE_RATE: Final[float] = 0.0
