@@ -2,9 +2,9 @@
 
 **What is a soybean crusher earning today, and how much of it is biodiesel?**
 
-Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/) · [Live app](https://commodity-backtester.streamlit.app/)
+Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/) · [Live app](https://soybean-crush-margin.streamlit.app/)
 
-[![Live App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://commodity-backtester.streamlit.app/)
+[![Live App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://soybean-crush-margin.streamlit.app/)
 [![CI](https://github.com/rossi-diego/soybean-crush-margin/actions/workflows/ci.yml/badge.svg)](https://github.com/rossi-diego/soybean-crush-margin/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
