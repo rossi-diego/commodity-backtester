@@ -113,7 +113,7 @@ HERO_HTML = """<div class="cm-hero"><div>
 <ol class="cm-steps">
 <li><i>1</i><b>Today's margin</b><span>What crushing a tonne of soybeans earns, against the past 5 years.</span></li>
 <li><i>2</i><b>Where it comes from</b><span>How much of the value is oil, now pulled by biodiesel.</span></li>
-<li><i>3</i><b>Oil against diesel</b><span>Is soybean oil a cheap or a dear fuel feedstock?</span></li>
+<li><i>3</i><b>Oil against diesel</b><span>What the oil in biodiesel costs next to diesel.</span></li>
 </ol></div>"""
 DATA_SOURCE = (
     "CBOT soybeans, meal and oil, and NYMEX heating oil. Daily futures closes from Yahoo Finance"
@@ -147,12 +147,13 @@ VALUE_RAIL = (
 )
 FEEDSTOCK_RAIL = (
     "## Oil as a fuel feedstock\n\n"
-    "About 0.90 t of soybean oil makes 1 m³ of biodiesel. Heating oil stands in for the diesel "
-    "it replaces.\n\n"
-    "A positive gap means the oil costs more than the fuel it replaces, so producers lean on "
-    "blending mandates and credits. A narrow gap means cheap feedstock for fuel.\n\n"
-    f"Biodiesel holds about 7% less energy than diesel per unit of volume "
-    f"([AFDC]({AFDC_URL})); the gap compares volumes."
+    "About 0.90 t of soybean oil makes 1 m³ of biodiesel. The chart compares what that oil "
+    "costs with 1 m³ of heating oil, which stands in for diesel.\n\n"
+    "**It is not the biodiesel price.** Methanol, energy and the plant come on top, and "
+    f"biodiesel holds about 7% less energy than diesel ([AFDC]({AFDC_URL})), so biodiesel costs "
+    "more to make than this gap shows. Blending mandates and credits pay the difference.\n\n"
+    "A higher gap means dearer feedstock. A lower one means soybean oil is cheap as a fuel, "
+    "which pulls its demand toward biodiesel."
 )
 METHOD_FORMULA = (
     "## How it is calculated\n\n"
@@ -270,10 +271,10 @@ def _summary(crush: Reading, share: Reading | None, gap: Reading | None) -> None
         )
         _kpi(
             "gap",
-            "Soy oil vs diesel",
+            "Oil cost vs diesel",
             "n/a" if gap is None else _usd(gap.value, "m³", signed=True),
-            "per m³ of biodiesel",
-            "Oil feedstock cost minus heating oil, before credits.",
+            "per m³ of biodiesel, oil only",
+            "Not the biodiesel price: processing comes on top.",
         )
     with right:
         st.warning(WARNING, icon=":material/info:")
@@ -331,14 +332,21 @@ def _value_section(table: pd.DataFrame, share: Reading, window: str) -> None:
             st.markdown(VALUE_RAIL)
 
 
+def _gap_reading(gap: Reading) -> str:
+    if gap.percentile is None or 20 < gap.percentile < 80:
+        return ""
+    cheap = gap.percentile <= 20
+    return f", so soybean oil is unusually {'cheap' if cheap else 'dear'} against diesel"
+
+
 def _feedstock_section(table: pd.DataFrame, gap: Reading, window: str) -> None:
     row = table.loc[gap.date]
-    side = "above" if gap.value >= 0 else "below"
+    side = "more" if gap.value >= 0 else "less"
     head = (
-        f"**Soybean oil costs {_usd(row['feedstock'], 'm³')} of biodiesel on {gap.date.date()}, "
-        f"{_usd(abs(gap.value), 'm³')} {side} heating oil.** The gap is "
-        f"{_rank_clause(gap).replace('higher than', 'wider than')}."
-        f"{_older_note(gap)}"
+        f"**The soybean oil in 1 m³ of biodiesel costs {_usd(row['feedstock'], 'm³')} on "
+        f"{gap.date.date()}, {_usd(abs(gap.value), 'm³')} {side} than 1 m³ of heating oil.** "
+        f"That is the feedstock alone, not the biodiesel price. The gap is {_rank_clause(gap)}"
+        f"{_gap_reading(gap)}.{_older_note(gap)}"
     )
     shown = _window(table, window)
     with st.container(key="row-feedstock"):
