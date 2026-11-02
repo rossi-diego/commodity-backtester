@@ -2,21 +2,20 @@
 toolbarMode = "minimal"
 
 [theme]
-base = "light"
-primaryColor = "#2a78d6"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f6f7f9"
-textColor = "#14181f"
-borderColor = "#e3e6eb"
-linkColor = "#1f5fbf"
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap, sans-serif"
+base = "dark"
+primaryColor = "#c58512"
+backgroundColor = "#0b1016"
+secondaryBackgroundColor = "#141b23"
+textColor = "#eef2f6"
+borderColor = "#2a3440"
+linkColor = "#8ab8f5"
+font = "IBM Plex Sans:https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap, sans-serif"
 headingFontWeights = [600, 600, 600, 600, 600, 600]
-headingFontSizes = ["1.5rem", "1.125rem", "1.125rem", "0.875rem", "0.875rem", "0.875rem"]
 baseFontSize = 15
-metricValueFontSize = "1.5rem"
+metricValueFontSize = "1.625rem"
 metricValueFontWeight = 600
 baseRadius = "6px"
 buttonRadius = "6px"
 showWidgetBorder = true
-paddingTop = "0.5rem"
-chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a"]
+paddingTop = "1rem"
+chartCategoricalColors = ["#c58512", "#4d8fe8", "#7d8796"]
