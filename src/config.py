@@ -10,6 +10,11 @@ DATA_DIR.mkdir(exist_ok=True)
 # Parquet cache of daily closes. Git-ignored, rebuilt from Yahoo Finance when stale.
 YFINANCE_RAW: Final[Path] = DATA_DIR / "prices.parquet"
 
+# Weekly D4 RIN prices from EPA: a local cache, and a dated copy kept in the repository
+# as the fallback when EPA cannot be reached.
+RIN_CACHE: Final[Path] = DATA_DIR / "rin_d4.csv"
+RIN_SEED: Final[Path] = DATA_DIR / "seed" / "epa_d4_rin_weekly.csv"
+
 # First requested date. The crush legs all start trading on Yahoo in early 2000.
 DEFAULT_START_DATE: Final[str] = "2000-01-01"
 

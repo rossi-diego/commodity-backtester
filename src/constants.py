@@ -22,6 +22,7 @@ __all__ = [
     "OIL",
     "OIL_PER_M3_BIODIESEL",
     "OIL_YIELD",
+    "RINS_PER_GALLON_BIODIESEL",
     "SHORT_TONS_PER_TONNE",
     "CommoditySpec",
     "commodities_dict",
@@ -68,3 +69,6 @@ OIL_YIELD: Final[float] = 11 / 60
 # Tonnes of soybean oil per m3 of biodiesel. EIA plant data for 2017 to 2020 average
 # 7.50 lb per gallon (farmdoc daily, 16 Feb 2022), which is 0.899 t/m3.
 OIL_PER_M3_BIODIESEL: Final[float] = 0.90
+
+# EPA equivalence value for biodiesel under the Renewable Fuel Standard (40 CFR 80.1415).
+RINS_PER_GALLON_BIODIESEL: Final[float] = 1.5

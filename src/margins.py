@@ -15,11 +15,25 @@ from .constants import (
     OIL,
     OIL_PER_M3_BIODIESEL,
     OIL_YIELD,
+    RINS_PER_GALLON_BIODIESEL,
     SHORT_TONS_PER_TONNE,
 )
 from .rolls import crush_flags, gap_flags
 
-__all__ = ["CRUSH_COLUMNS", "GAP_COLUMNS", "crush_table", "gap_table", "to_metric"]
+__all__ = [
+    "CRUSH_COLUMNS",
+    "GAP_COLUMNS",
+    "RIN_TOLERANCE",
+    "add_rins",
+    "crush_table",
+    "gap_table",
+    "rin_per_m3",
+    "to_metric",
+]
+
+# A weekly RIN price is used for the sessions of its week and the next. Past that the
+# value is left empty rather than stretched.
+RIN_TOLERANCE = pd.Timedelta(days=13)
 
 CRUSH_COLUMNS = ["beans", "meal_value", "oil_value", "crush", "oil_share", "flagged"]
 GAP_COLUMNS = ["feedstock", "diesel", "gap", "flagged"]
@@ -72,3 +86,25 @@ def gap_table(prices: pd.DataFrame) -> pd.DataFrame:
     table["gap"] = table["feedstock"] - table["diesel"]
     table["flagged"] = gap_flags(pd.DatetimeIndex(table.index)).to_numpy()
     return table
+
+
+def rin_per_m3(usd_per_rin: float | pd.Series) -> float | pd.Series:
+    """Value of the D4 RINs a m3 of biodiesel generates: 1.5 RINs per gallon."""
+    return RINS_PER_GALLON_BIODIESEL * GALLONS_PER_M3 * usd_per_rin
+
+
+def add_rins(table: pd.DataFrame, d4: pd.Series | None) -> pd.DataFrame:
+    """Add the D4 RIN value per m3 and the gap after it, matched to each session's week."""
+    out = table.copy()
+    if d4 is None or d4.empty or table.empty:
+        out["rin_value"] = float("nan")
+    else:
+        weekly = rin_per_m3(d4.sort_index())
+        assert isinstance(weekly, pd.Series)
+        sessions = pd.DatetimeIndex(table.index).as_unit("ns")
+        weekly.index = pd.DatetimeIndex(weekly.index).as_unit("ns")
+        out["rin_value"] = weekly.reindex(
+            sessions, method="ffill", tolerance=RIN_TOLERANCE
+        ).to_numpy()
+    out["after_rin"] = out["gap"] - out["rin_value"]
+    return out
