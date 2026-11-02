@@ -781,6 +781,15 @@ class TestDarkTheme:
         for color in (visualization.ENTRY, visualization.EXIT, visualization.FLAT):
             assert _contrast(color, visualization.SURFACE) >= 3
 
+    def test_page_clears_the_streamlit_cloud_bar(self) -> None:
+        """The bar sits in the parent page, covers 56 px and hid the title in production."""
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        tops = re.findall(
+            r"stMainBlockContainer'\]\{(?:max-width:none;)?padding:([\d.]+)rem", source
+        )
+        assert len(tops) == 2
+        assert all(float(top) * 15 >= 56 for top in tops)
+
     def test_warning_does_not_borrow_the_position_colour(self) -> None:
         """Amber means long. A warning in amber would make a long position read as an alert."""
         source = (ROOT / "app.py").read_text(encoding="utf-8")
