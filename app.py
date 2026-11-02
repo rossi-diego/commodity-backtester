@@ -210,7 +210,8 @@ def _load_rins() -> RinResult:
 
 
 def _usd(value: float, unit: str, signed: bool = False) -> str:
-    sign = "-" if round(value) < 0 else ("+" if signed and round(value) > 0 else "")
+    # A typographic minus, as on the chart axes, so a negative value never reads as a dash.
+    sign = "−" if round(value) < 0 else ("+" if signed and round(value) > 0 else "")
     return f"{sign}${abs(value):,.0f}/{unit}"
 
 

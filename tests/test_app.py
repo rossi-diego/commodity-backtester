@@ -107,7 +107,7 @@ class TestFirstLoad:
         headline = next(
             block.value for block in app.markdown if "Soybean crush margin" in block.value
         )
-        sign = "-" if round(reading.value) < 0 else ""
+        sign = "−" if round(reading.value) < 0 else ""
         assert f"{sign}\\${abs(reading.value):,.0f}/t" in headline
         assert str(reading.date.date()) in headline
         assert f"{reading.percentile:.0f}%" in headline
@@ -134,6 +134,12 @@ class TestFirstLoad:
         _no_exceptions(app)
         assert any("credit is not shown" in block.value for block in app.markdown)
         assert "Not the biodiesel price" in app.caption[3].value
+
+    def test_negative_values_use_a_typographic_minus(self, app) -> None:
+        app.run()
+        caption = app.caption[3].value
+        assert "−\\$" in caption
+        assert "-\\$" not in caption
 
     def test_gap_is_never_presented_as_a_biodiesel_price(self, app) -> None:
         app.run()
