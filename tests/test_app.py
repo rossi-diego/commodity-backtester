@@ -20,7 +20,7 @@ from src.seasonal import latest_reading
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
-LABELS = ["Crush margin", "Against 5 years", "Oil share", "Soy oil vs diesel"]
+LABELS = ["Crush margin", "Against 5 years", "Oil share", "Oil cost vs diesel"]
 CHARTS = {
     "seasonal_chart",
     "history_chart",
@@ -110,6 +110,13 @@ class TestFirstLoad:
         app.run()
         for block in [*app.markdown, *app.warning, *app.caption]:
             assert not re.search(r"(?<!\\)\$", block.value), block.value
+
+    def test_gap_is_never_presented_as_a_biodiesel_price(self, app) -> None:
+        app.run()
+        head = next(block.value for block in app.markdown if "soybean oil in 1 m³" in block.value)
+        assert "not the biodiesel price" in head
+        assert "It is not the biodiesel price" in _markdown(app)
+        assert "oil only" in _metric(app, "Oil cost vs diesel").delta
 
     def test_warning_names_what_is_left_out(self, app) -> None:
         app.run()
@@ -242,7 +249,7 @@ class TestDataStates:
             at.run()
         _no_exceptions(at)
         assert any("feedstock gap is not shown" in w.value for w in at.warning)
-        assert _metric(at, "Soy oil vs diesel").value == "n/a"
+        assert _metric(at, "Oil cost vs diesel").value == "n/a"
         assert "seasonal_chart" in _chart_keys(at)
         st.cache_data.clear()
 

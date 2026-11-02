@@ -22,7 +22,7 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 |---|---|---|
 | Is crushing paying well or badly now? | Crush margin, with its rank against the past 5 years and this year drawn over the monthly range of the five previous years | USD per tonne of soybeans |
 | How much of the value is oil? | Oil share of the product value, and meal and oil value against the soybean cost | % and USD per tonne |
-| Is soybean oil a cheap or a dear fuel feedstock? | Soybean oil cost per m³ of biodiesel against heating oil per m³, and the gap between them | USD per m³ |
+| What does the oil in biodiesel cost next to diesel? | The soybean oil needed for 1 m³ of biodiesel against 1 m³ of heating oil, and the gap between them. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
 
 Every number on the page states its date and unit. The page opens on the latest data with no button to press.
 
@@ -33,7 +33,7 @@ Every number on the page states its date and unit. The page opens on the latest 
 | Crush margin | 0.733 × meal + 0.183 × oil − soybeans, all in USD per tonne | CME board crush: 44 lb of meal and 11 lb of oil per 60 lb bushel, which is 0.022 × meal + 0.11 × oil − soybeans in USD per bushel ([CME guide](https://www.cmegroup.com/education/files/soybean-crush-reference-guide.pdf)) |
 | Oil share | oil value / (oil value + meal value) | Derived |
 | Feedstock cost | 0.90 t of soybean oil per m³ of biodiesel × oil in USD per tonne | EIA plant data, 2017 to 2020, average 7.50 lb per gallon, which is 0.899 t per m³ ([farmdoc daily](https://farmdocdaily.illinois.edu/wp-content/uploads/2022/02/fdd021622.pdf)) |
-| Soy oil vs diesel | feedstock cost − heating oil, in USD per m³ | NYMEX heating oil stands in for diesel |
+| Oil cost vs diesel | feedstock cost − heating oil, in USD per m³ | NYMEX heating oil stands in for diesel. The industry quotes the same comparison per gallon as the BOHO spread |
 
 Unit conversions use the exact definitions (1 lb = 0.45359237 kg, 1 US gallon = 3.785411784 L) and are tested in `tests/test_constants.py`.
 
