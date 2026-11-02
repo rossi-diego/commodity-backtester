@@ -1,1 +1,1 @@
-"""Tests package for Commodity Backtester."""
+"""Tests for Soybean Crush Margin."""
