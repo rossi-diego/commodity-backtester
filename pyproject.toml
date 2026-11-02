@@ -1,12 +1,12 @@
 [project]
-name = "commodity-backtester"
+name = "soybean-crush-margin"
 version = "0.2.0"
-description = "Interactive backtester for rules on CBOT and NYMEX commodity futures"
+description = "Soybean crush margin and biodiesel feedstock economics from CBOT and NYMEX futures"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Diego Rossi", email = "94.diegorossi@gmail.com" }]
-keywords = ["commodities", "backtesting", "quant", "trading", "streamlit"]
+keywords = ["commodities", "soybean-crush", "biodiesel", "market-risk", "streamlit"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

@@ -1,1 +1,1 @@
-"""commodity-backtester — core library package."""
+"""Soybean Crush Margin: data, calendars, margins and figures."""

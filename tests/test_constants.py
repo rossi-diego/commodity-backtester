@@ -1,127 +1,67 @@
-"""Unit tests for src/constants.py — contract reference data integrity."""
+"""Contract reference data and conversion factors."""
 
 from __future__ import annotations
 
+import re
+
+import pytest
+
 from src.constants import (
-    COMMODITY_UNITS,
-    RATIO_PAIRS,
+    BUSHELS_PER_TONNE,
+    COMMODITIES,
+    GALLONS_PER_M3,
+    LB_PER_TONNE,
+    MEAL_YIELD,
+    OIL_PER_M3_BIODIESEL,
+    OIL_YIELD,
+    SHORT_TONS_PER_TONNE,
     commodities_dict,
-    contract_sizes,
     tickers,
-    tons_conversion,
 )
 
-
-class TestRatioPairs:
-    def test_four_curated_pairs(self) -> None:
-        assert len(RATIO_PAIRS) == 4
-
-    def test_every_leg_has_contract_data(self) -> None:
-        for pair, legs in RATIO_PAIRS.items():
-            for leg in legs:
-                assert leg in contract_sizes, f"Pair '{pair}': no contract size for '{leg}'."
-                assert leg in tons_conversion, f"Pair '{pair}': no conversion for '{leg}'."
-
-    def test_legs_differ(self) -> None:
-        for pair, (first, second) in RATIO_PAIRS.items():
-            assert first != second, f"Pair '{pair}' uses the same market twice."
-
-
-class TestCommodityUnits:
-    def test_lookup_is_by_display_name(self) -> None:
-        assert set(COMMODITY_UNITS) == set(contract_sizes)
-        assert set(COMMODITY_UNITS) == set(tons_conversion)
-
-    def test_soybean_unit(self) -> None:
-        assert COMMODITY_UNITS["Soybean"] == "cents/bushel"
+KG_PER_LB = 0.45359237
+LITRES_PER_GALLON = 3.785411784
 
 
 class TestTickers:
-    def test_all_tickers_are_continuous(self) -> None:
-        """All tickers must use the continuous futures ``=F`` suffix."""
+    def test_four_crush_legs(self) -> None:
+        assert tickers == ["ZS=F", "ZM=F", "ZL=F", "HO=F"]
+        assert list(commodities_dict.values()) == [
+            "Soybean",
+            "Soybean Meal",
+            "Soybean Oil",
+            "Heating Oil",
+        ]
+
+    def test_continuous_without_month_codes(self) -> None:
         for ticker in tickers:
-            assert ticker.endswith("=F"), (
-                f"Ticker '{ticker}' is not a continuous contract. "
-                "Use the '=F' suffix (e.g. 'ZS=F') to avoid expiry issues."
-            )
+            assert ticker.endswith("=F")
+            assert not re.search(r"[FGHJKMNQUVXZ]\d{2}", ticker)
 
-    def test_no_month_year_in_ticker(self) -> None:
-        """Hardcoded month codes (N25, Z24, etc.) must not appear in tickers."""
-        import re
-
-        month_pattern = re.compile(r"[FGHJKMNQUVXZ]\d{2}")
-        for ticker in tickers:
-            assert not month_pattern.search(ticker), (
-                f"Ticker '{ticker}' contains a month/year code. "
-                "Switch to a continuous contract ticker."
-            )
+    def test_units_match_the_exchange_quotes(self) -> None:
+        units = {spec.name: spec.unit for spec in COMMODITIES.values()}
+        assert units["Soybean"] == "US cents/bushel"
+        assert units["Soybean Meal"] == "USD/short ton"
+        assert units["Soybean Oil"] == "US cents/lb"
+        assert units["Heating Oil"] == "USD/gallon"
 
 
-class TestCommoditiesDict:
-    def test_every_ticker_has_a_display_name(self) -> None:
-        for ticker in tickers:
-            assert ticker in commodities_dict, f"No display name for ticker '{ticker}'."
+class TestConversions:
+    def test_bushels_per_tonne(self) -> None:
+        assert pytest.approx(1000, rel=1e-4) == 60 * KG_PER_LB * BUSHELS_PER_TONNE
 
-    def test_display_names_are_non_empty(self) -> None:
-        for ticker, name in commodities_dict.items():
-            assert name.strip(), f"Empty display name for ticker '{ticker}'."
+    def test_mass_and_volume(self) -> None:
+        assert pytest.approx(1000, rel=1e-5) == LB_PER_TONNE * KG_PER_LB
+        assert pytest.approx(1000, rel=1e-4) == SHORT_TONS_PER_TONNE * 2000 * KG_PER_LB
+        assert pytest.approx(1000, rel=1e-5) == GALLONS_PER_M3 * LITRES_PER_GALLON
 
-    def test_no_month_year_in_display_names(self) -> None:
-        """Display names must not contain month-year strings like 'july 25'."""
-        import re
+    def test_board_crush_yields_match_cme_factors(self) -> None:
+        """CME: 0.022 x meal (USD/short ton) and 0.11 x oil (cents/lb) per bushel."""
+        meal_short_tons_per_bushel = MEAL_YIELD * 60 / 2000
+        oil_lb_per_bushel = OIL_YIELD * 60
+        assert meal_short_tons_per_bushel == pytest.approx(0.022)
+        assert oil_lb_per_bushel == pytest.approx(11)
 
-        date_pattern = re.compile(
-            r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{2,4}\b", re.IGNORECASE
-        )
-        for ticker, name in commodities_dict.items():
-            assert not date_pattern.search(name), (
-                f"Display name '{name}' for ticker '{ticker}' contains a month/year. "
-                "Use generic names (e.g. 'Soybean' not 'Soybean - july 25')."
-            )
-
-
-class TestContractSizes:
-    def test_every_commodity_has_contract_size(self) -> None:
-        display_names = set(commodities_dict.values())
-        for name in display_names:
-            assert name in contract_sizes, f"No contract size for commodity '{name}'."
-
-    def test_contract_sizes_are_positive(self) -> None:
-        for name, size in contract_sizes.items():
-            assert size > 0, f"Contract size for '{name}' must be positive, got {size}."
-
-    def test_grain_contract_sizes_within_range(self) -> None:
-        """CBOT grain contracts are 5000 bushels; MT equivalent should be 90–140 MT."""
-        grain_commodities = {"Soybean", "Corn", "KC HRW Wheat"}
-        for name in grain_commodities:
-            if name in contract_sizes:
-                assert 90 < contract_sizes[name] < 145, (
-                    f"Contract size for '{name}' ({contract_sizes[name]} MT) is outside "
-                    "the expected range for a 5000-bushel CBOT grain contract (90–145 MT)."
-                )
-
-
-class TestTonsConversion:
-    def test_every_commodity_has_conversion_factor(self) -> None:
-        display_names = set(commodities_dict.values())
-        for name in display_names:
-            assert name in tons_conversion, f"No conversion factor for commodity '{name}'."
-
-    def test_conversion_factors_are_positive(self) -> None:
-        for name, factor in tons_conversion.items():
-            assert factor > 0, f"Conversion factor for '{name}' must be positive, got {factor}."
-
-    def test_grain_factors_in_expected_range(self) -> None:
-        """Grain factors convert cents/bushel → $/MT (expected ~0.35–0.45)."""
-        grain_commodities = {"Soybean", "Corn", "KC HRW Wheat"}
-        for name in grain_commodities:
-            if name in tons_conversion:
-                assert 0.30 < tons_conversion[name] < 0.50, (
-                    f"Conversion factor for '{name}' ({tons_conversion[name]}) is outside "
-                    "the expected range for a grain commodity (cents/bu → $/MT: ~0.35–0.45)."
-                )
-
-    def test_soybean_oil_factor_in_expected_range(self) -> None:
-        """Soybean oil factor converts cents/lb → $/MT (~22.0)."""
-        if "Soybean Oil" in tons_conversion:
-            assert 20 < tons_conversion["Soybean Oil"] < 25
+    def test_biodiesel_factor_is_7_5_lb_per_gallon(self) -> None:
+        tonnes_per_m3 = 7.5 * KG_PER_LB / LITRES_PER_GALLON
+        assert pytest.approx(tonnes_per_m3, abs=0.005) == OIL_PER_M3_BIODIESEL

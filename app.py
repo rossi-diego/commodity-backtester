@@ -1,199 +1,183 @@
-"""Commodity Backtester: Streamlit UI. All computation lives in ``src``."""
+"""Soybean Crush Margin: Streamlit UI. All computation lives in ``src``."""
 
 from __future__ import annotations
 
-import datetime
 import logging
 
 import pandas as pd
 import streamlit as st
-from streamlit.delta_generator import DeltaGenerator
 
-from src.catalog import RULES
-from src.constants import COMMODITY_UNITS, RATIO_PAIRS, commodities_dict, tons_conversion
+from src.constants import BUSHELS_PER_TONNE
 from src.data_loader import LoadResult, load_prices
-from src.monitor import ratio_series, ratio_snapshot, rolling_stats
-from src.runner import BacktestResult, run_backtest
-from src.strategy import BacktestError
+from src.margins import crush_table, gap_table
+from src.seasonal import Reading, latest_reading, monthly_band
 from src.visualization import (
-    markers_hidden,
-    price_signals_figure,
-    ratio_figure,
-    unadjusted_pnl_figure,
-    zscore_figure,
+    INK_SERIES,
+    feedstock_figure,
+    history_figure,
+    oil_share_figure,
+    seasonal_figure,
+    value_figure,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-VIEWS = ["Backtest", "Ratio monitor"]
-MARKETS = list(commodities_dict.values())
-RULE_KEY_BY_LABEL = {rule.label: rule.key for rule in RULES}
-RULE_HELP = "\n\n".join(f"**{rule.label}:** {rule.description}" for rule in RULES)
-PERIODS = ["1Y", "3Y", "5Y", "10Y", "All", "Custom"]
-DEFAULT_PERIOD = "10Y"
-DEFAULT_CUSTOM_START = datetime.date(2008, 1, 2)
-DEFAULT_CUSTOM_END = datetime.date(2012, 12, 31)
-FEW_TRADES_BELOW = 30
-REPOSITORY_URL = "https://github.com/rossi-diego/commodity-backtester"
+REPOSITORY_URL = "https://github.com/rossi-diego/soybean-crush-margin"
+LINKEDIN_URL = "https://www.linkedin.com/in/rossi-diego/"
+CME_GUIDE_URL = "https://www.cmegroup.com/education/files/soybean-crush-reference-guide.pdf"
+FARMDOC_URL = "https://farmdocdaily.illinois.edu/wp-content/uploads/2022/02/fdd021622.pdf"
+AFDC_URL = "https://afdc.energy.gov/fuels/properties"
+WINDOWS = ["5Y", "10Y", "All"]
+DEFAULT_WINDOW = "10Y"
 
 METRIC_STYLE = {"delta_color": "off", "delta_arrow": "off"}
 
-# Amber means "holds the contract" and nothing else, so the warning beside it is not amber.
-# Other alerts keep the theme colours: they replace the results, so they must look different.
+# Amber means "the crush margin" and nothing else: controls, badges and the warning stay neutral.
 # The rules target Streamlit test ids, so redo the screenshots when upgrading Streamlit.
 # The top padding clears the 56 px bar Streamlit Cloud draws over the app from its parent page.
 APP_CSS = """<style>
-:root{--page:#0b1016;--card:#141b23;--raised:#1e2732;--line:#2a3440;--ink:#eef2f6;--mut:#a3afbd;--head:linear-gradient(115deg,#1a2430 0%,#16212c 55%,#3a2c10 100%);--posl:#c58512;--onpos:#0b1016;--posf:#3d4957;--step:rgba(255,255,255,.07)}
+:root{--page:#0b1016;--card:#141b23;--raised:#1e2732;--line:#2a3440;--ink:#eef2f6;--mut:#a3afbd;--head:linear-gradient(115deg,#1a2430 0%,#16212c 55%,#3a2c10 100%);--crush:#c58512;--oncrush:#0b1016;--step:rgba(255,255,255,.07)}
 [data-testid='stMainBlockContainer']{max-width:none;padding:3.75rem 2rem 2rem}
-.bt-hero{background:var(--head);border-radius:12px;padding:1.1rem 1.5rem;color:#fff;display:grid;grid-template-columns:minmax(0,13fr) minmax(0,11fr);gap:1.5rem;align-items:center}
-.bt-hero h1{color:#fff;font-size:2.25rem;font-weight:600;letter-spacing:-.02em;line-height:1.1;margin:0 0 .4rem;padding:0}
-.bt-q{font-size:1.0625rem;line-height:1.35;margin:0 0 .4rem;color:#fff}
-.bt-meta{font-size:.875rem;line-height:1.45;margin:0;color:#dbe6f2}
-.bt-meta a{color:#fff;font-weight:500}
-.bt-meta strong{color:#fff;font-weight:600}
-.bt-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:0;padding:0;list-style:none}
-.bt-steps li{background:var(--step);border:1px solid rgba(255,255,255,.18);border-radius:10px;padding:.6rem .75rem;font-size:.8125rem;line-height:1.3;color:#e8eff7}
-.bt-steps b{color:#fff;font-size:.9375rem;font-weight:600}
-.bt-steps span{display:block;margin-top:.3rem}
-.bt-steps i{font-style:normal;display:inline-block;width:1.35rem;height:1.35rem;line-height:1.35rem;text-align:center;border-radius:50%;background:#fff;color:#0b1016;font-weight:600;font-size:.75rem;margin-right:.35rem}
+.cm-hero{background:var(--head);border-radius:12px;padding:1.1rem 1.5rem;color:#fff;display:grid;grid-template-columns:minmax(0,13fr) minmax(0,11fr);gap:1.5rem;align-items:center}
+.cm-hero h1{color:#fff;font-size:2.25rem;font-weight:600;letter-spacing:-.02em;line-height:1.1;margin:0 0 .4rem;padding:0}
+.cm-q{font-size:1.0625rem;line-height:1.35;margin:0 0 .4rem;color:#fff}
+.cm-meta{font-size:.875rem;line-height:1.45;margin:0;color:#dbe6f2}
+.cm-meta a{color:#fff;font-weight:500}
+.cm-meta strong{color:#fff;font-weight:600}
+.cm-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:0;padding:0;list-style:none}
+.cm-steps li{background:var(--step);border:1px solid rgba(255,255,255,.18);border-radius:10px;padding:.6rem .75rem;font-size:.8125rem;line-height:1.3;color:#e8eff7}
+.cm-steps b{color:#fff;font-size:.9375rem;font-weight:600}
+.cm-steps span{display:block;margin-top:.3rem}
+.cm-steps i{font-style:normal;display:inline-block;width:1.35rem;height:1.35rem;line-height:1.35rem;text-align:center;border-radius:50%;background:#fff;color:#0b1016;font-weight:600;font-size:.75rem;margin-right:.35rem}
 [class*='st-key-card']{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.85rem 1rem}
-.st-key-card-controls{border-top:3px solid var(--posl);gap:.5rem}
-.st-key-card-controls [data-testid='stMarkdownContainer'] p{margin:0;font-size:.9375rem}
-.st-key-controls>div{flex:1 1 9rem;min-width:0;width:auto!important}
-.st-key-controls>div:has([data-testid='stButtonGroup']){flex:0 0 auto}
-.st-key-controls>div:has([data-testid='stPopover']){flex:0 0 auto}
-.st-key-controls [data-testid='stButtonGroup'] button{min-height:2.5rem}
 [data-testid='stMarkdownContainer']{margin-bottom:0}
 [data-testid='stMetricDelta']{background:none!important;padding:0!important;color:var(--mut)!important;font-size:.8125rem!important}
 [data-testid='stMetricDelta'] *{white-space:normal!important}
 [data-testid='stMetricLabel'] p{color:var(--mut);font-size:.8125rem;font-weight:500}
+[data-testid='stMetricValue']{white-space:nowrap}
 [class*='st-key-card-kpi']>div{flex-shrink:0}
 [class*='st-key-card-kpi'] [data-testid='stMarkdown'],[class*='st-key-card-kpi'] [data-testid='stMarkdown']>div{display:block;height:auto!important}
-@media (min-width:1101px){[class*='st-key-card-kpi'] [data-testid='stElementContainer']:has([data-testid='stCaptionContainer']){min-height:2.1rem}}
-[class*='st-key-card-kpi'] [data-testid='stCaptionContainer'] p{font-size:.78rem;line-height:1.3;margin:0;color:var(--mut);opacity:1}
-[class*='st-key-card-kpi']{gap:.2rem;flex:1 1 auto;height:auto!important;padding:.7rem .85rem}
-.st-key-kpis>div{display:flex}
+@media (min-width:1101px){[class*='st-key-card-kpi'] [data-testid='stElementContainer']:has([data-testid='stCaptionContainer']){min-height:3.1rem}}
+[class*='st-key-card-kpi'] [data-testid='stCaptionContainer'] p{font-size:.78rem;line-height:1.3;margin:0;color:var(--mut)}
+[class*='st-key-card-kpi']{gap:.2rem;flex:1 1 0;min-width:0;height:auto!important;padding:.7rem .85rem}
+.st-key-kpis>div{display:flex;flex:1 1 0;min-width:0;width:auto!important}
 [data-testid='stCaptionContainer']{opacity:1}
 [data-testid='stCaptionContainer'] p{color:var(--mut)}
-.st-key-kpis{align-items:stretch}
-.st-key-readrow [data-testid='stHorizontalBlock'],.st-key-chartrow [data-testid='stHorizontalBlock']{align-items:stretch}
-.st-key-kpis{height:auto!important;flex:0 0 auto}
+.st-key-kpis{align-items:stretch;height:auto!important;flex:0 0 auto}
+.st-key-readrow [data-testid='stHorizontalBlock'],[class*='st-key-row'] [data-testid='stHorizontalBlock']{align-items:stretch}
 .st-key-readrow [data-testid='stColumn'] [data-testid='stVerticalBlock']:has(>[data-testid='stLayoutWrapper']>.st-key-kpis){flex:1 1 auto;height:auto}
 .st-key-readrow [data-testid='stColumn'] [data-testid='stLayoutWrapper']:has(>.st-key-kpis){flex:0 0 auto}
-.st-key-chartrow [data-testid='stColumn']>div{height:100%}
+[class*='st-key-row'] [data-testid='stColumn']>div{height:100%}
 .st-key-readrow [data-testid='stColumn']:last-child>div,.st-key-readrow [data-testid='stElementContainer']:has([data-testid='stAlert']){height:100%}
 .st-key-readrow [data-testid='stAlert'],[class*='st-key-card-rail']{height:100%}
-.st-key-chartrow [data-testid='stColumn']:last-child [data-testid='stVerticalBlock'],.st-key-chartrow [data-testid='stColumn']:last-child [data-testid='stLayoutWrapper']{height:100%}
-[data-testid='stExpander']{background:var(--card);border-radius:10px}
+[class*='st-key-row'] [data-testid='stColumn']:last-child [data-testid='stVerticalBlock'],[class*='st-key-row'] [data-testid='stColumn']:last-child [data-testid='stLayoutWrapper']{height:100%}
 .st-key-method>div{flex:1 1 0;min-width:0;width:auto!important}
-.st-key-charthead{margin-bottom:-.5rem}
-.st-key-kpis>div{flex:1 1 0;min-width:0;width:auto!important}
-.st-key-card-kpi-long{background:var(--posl);border-color:var(--posl)}
-.st-key-card-kpi-flat{background:var(--posf);border-color:var(--posf)}
-.st-key-card-kpi-hero{background:var(--raised);border-color:var(--mut)}
-.st-key-card-kpi-long *{color:var(--onpos)!important}
-.st-key-card-kpi-flat *,.st-key-card-kpi-hero *{color:#fff!important}
-.st-key-card-kpi-long [data-testid='stMetricValue'],.st-key-card-kpi-flat [data-testid='stMetricValue'],.st-key-card-kpi-hero [data-testid='stMetricValue']{font-size:2.25rem;line-height:1.15;letter-spacing:-.02em}
-.st-key-card-kpi-pnl [data-testid='stMetricValue']{color:var(--mut);font-weight:500}
+.st-key-card-kpi-crush{background:var(--crush);border-color:var(--crush)}
+.st-key-card-kpi-crush *{color:var(--oncrush)!important}
+.st-key-card-kpi-crush [data-testid='stMetricValue']{font-size:2.25rem;line-height:1.15;letter-spacing:-.02em}
 .st-key-readrow [data-testid='stAlertContainer']{background:var(--raised);color:var(--ink);border-left:4px solid var(--ink);height:100%}
 .st-key-readrow [data-testid='stAlertContainer'] p,.st-key-readrow [data-testid='stAlertContainer'] [data-testid='stAlertDynamicIcon']{font-size:.875rem;line-height:1.45;margin:0;color:var(--ink)}
-.st-key-readrow [data-testid='stAlert']{height:100%}
-.st-key-chartrow [data-testid='stMarkdownContainer'] p{margin:0 0 .5rem}
-[class*='st-key-card-rail'] h4,.st-key-method h4{font-size:.9375rem;font-weight:600;margin:0 0 .35rem;padding:0;color:var(--ink)}
+[class*='st-key-row'] [data-testid='stMarkdownContainer'] p{margin:0 0 .5rem}
+[class*='st-key-card-rail'] h2,.st-key-method h2{font-size:.9375rem;font-weight:600;margin:0 0 .35rem;padding:0;color:var(--ink)}
 [class*='st-key-card-rail'] p,.st-key-method p{font-size:.875rem;line-height:1.45;color:var(--ink)}
-[class*='st-key-charthead'] p{font-size:.875rem;color:var(--mut);margin:0}
-[class*='st-key-charthead'] strong{color:var(--ink);font-weight:600}
-@media (max-width:1100px){.st-key-chartrow [data-testid='stColumn']{min-width:100%} .bt-hero{grid-template-columns:1fr;gap:.75rem} .bt-steps span{display:none} [class*='st-key-card-kpi'] [data-testid='stCaptionContainer']{display:none}}
+[data-testid='stHeaderActionElements']{display:none}
+[class*='st-key-head'] p{font-size:.875rem;color:var(--mut);margin:0}
+[class*='st-key-head'] strong{color:var(--ink);font-weight:600;font-size:1rem}
+:focus-visible{outline:2px solid var(--ink)!important;outline-offset:2px}
+@media (max-width:1100px){[class*='st-key-row'] [data-testid='stColumn']{min-width:100%} .cm-hero{grid-template-columns:1fr;gap:.75rem} .cm-steps span{display:none} [class*='st-key-card-kpi'] [data-testid='stCaptionContainer']{display:none} .st-key-kpis [data-testid='stMetricValue']{font-size:1.25rem} .st-key-card-kpi-crush [data-testid='stMetricValue']{font-size:2rem}}
 @media (max-width:640px){
  [data-testid='stMainBlockContainer']{padding:3.75rem .75rem 2rem}
- .bt-hero{padding:1rem;gap:.75rem;border-radius:10px}
- .bt-hero h1{font-size:1.75rem}
- .st-key-card-controls [data-testid='stElementContainer']:has(>[data-testid='stMarkdown']){display:none}
- .st-key-controls label[data-testid='stWidgetLabel']{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
- .bt-q{font-size:1rem}
- .bt-steps{gap:.4rem}
- .bt-steps li{padding:.5rem;font-size:.75rem}
- .bt-steps li span{display:none}
- .bt-steps b{font-size:.75rem;display:block;margin-top:.2rem}
- .bt-steps i{margin:0}
+ .cm-hero{padding:1rem;gap:.75rem;border-radius:10px}
+ .cm-hero h1{font-size:1.75rem}
+ .cm-q{font-size:1rem}
+ .cm-steps{display:none}
  [class*='st-key-card']{padding:.7rem .8rem}
- .st-key-controls{column-gap:.5rem;row-gap:.4rem}
  .st-key-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem}
  .st-key-kpis>div{width:auto!important}
  .st-key-kpis>div:first-child{grid-column:1/-1}
- [class*='st-key-card-kpi'] [data-testid='stCaptionContainer']{display:none}
- .st-key-kpis [data-testid='stMetricValue']{font-size:1.25rem}
- .st-key-card-kpi-long [data-testid='stMetricValue'],.st-key-card-kpi-flat [data-testid='stMetricValue'],.st-key-card-kpi-hero [data-testid='stMetricValue']{font-size:2rem}
  [class*='st-key-card-kpi']{padding:.55rem .6rem}
  [data-testid='stColumn']{min-width:100%}
  .st-key-method{flex-direction:column}
+ [data-testid='stPlotlyChart'] .nsewdrag{pointer-events:none}
+ [data-testid='stPlotlyChart'] .modebar-container{display:none}
 }
 </style>"""
 
-# Static markup: the only runtime value is the data line, built from the date index.
-HERO_HTML = """<div class="bt-hero"><div>
-<h1>Commodity Backtester</h1>
-<p class="bt-q">What does a simple rule say today in grain and energy futures, and how far can you trust it?</p>
-<p class="bt-meta">{data_line}</p>
-<p class="bt-meta">Built by <strong>Diego Rossi</strong>, Market Risk Coordinator at Grupo Oleoplan, Porto Alegre, Brazil. <a href="https://www.linkedin.com/in/diego-rossi-santanna/" target="_blank" rel="noopener">LinkedIn</a> &middot; <a href="https://github.com/rossi-diego/commodity-backtester" target="_blank" rel="noopener">GitHub</a></p>
+# Static markup: the only runtime values are the data line and the author link.
+HERO_HTML = """<div class="cm-hero"><div>
+<h1>Soybean Crush Margin</h1>
+<p class="cm-q">What is a soybean crusher earning today, and how much of it is biodiesel?</p>
+<p class="cm-meta">{data_line}</p>
+<p class="cm-meta">Built by <strong>Diego Rossi</strong>. <a href="{linkedin}" target="_blank" rel="noopener">LinkedIn</a> &middot; <a href="{repository}" target="_blank" rel="noopener">GitHub</a></p>
 </div>
-<ol class="bt-steps">
-<li><i>1</i><b>Pick a market</b><span>Soybean, corn, wheat, soy oil, soy meal, heating oil or crude.</span></li>
-<li><i>2</i><b>Pick a rule</b><span>Three plain rules, explained beside the chart.</span></li>
-<li><i>3</i><b>Read the result</b><span>Position first, then the warning. It updates by itself.</span></li>
+<ol class="cm-steps">
+<li><i>1</i><b>Today's margin</b><span>What crushing a tonne of soybeans earns, against the past 5 years.</span></li>
+<li><i>2</i><b>Where it comes from</b><span>How much of the value is oil, now pulled by biodiesel.</span></li>
+<li><i>3</i><b>Oil against diesel</b><span>Is soybean oil a cheap or a dear fuel feedstock?</span></li>
 </ol></div>"""
-DATA_SOURCE = "Seven CBOT and NYMEX front-month futures. Daily closes from Yahoo Finance"
-START_HERE = (
-    "**Start here:** pick a market and a rule. "
-    "Results update by themselves, there is nothing to run."
+DATA_SOURCE = (
+    "CBOT soybeans, meal and oil, and NYMEX heating oil. Daily futures closes from Yahoo Finance"
 )
 
-# Dollar signs are escaped because st.markdown reads a pair of them as LaTeX. The example is
-# dated because the engine's number moves with the data, and its three claims stay together:
-# without the last one, "+$63k" would suggest an edge.
-BACKTEST_WARNING = (
-    "**P&L is indicative: contract rolls book as P&L, so the sign can flip.** "
-    "Soybean Meal, 12M momentum, full history to 2026-10-27: about -\\$12.5k here, "
-    "about +\\$63k with roll days removed. "
-    "Neither rule has been shown to beat holding the front month."
+WARNING = (
+    "**Gross margins, before costs and credits.** Processing, energy, freight and local basis "
+    "are not deducted, and biofuel credits (RINs, LCFS, 45Z) are not added, though they often "
+    "decide real profits. Sessions in a roll or delivery window are drawn grey and left out of "
+    "every statistic."
 )
-MONITOR_WARNING = (
-    "**A monitor, not a strategy: no trades and no P&L.** Ratios use unadjusted front-month "
-    "closes, so contract rolls cause jumps."
+LOAD_ERROR = (
+    "Prices could not be loaded from Yahoo Finance and no saved copy is available. "
+    "Try again in a minute."
 )
-CHART_KEY_HELP = (
-    "The line turns amber and the background shades while the rule holds the contract. "
-    "Triangles mark each entry and exit. The dot is the last close."
+MARGIN_RAIL = (
+    "## How to read it\n\n"
+    "A crusher buys soybeans and sells the meal and oil they yield. The margin is what is left "
+    "per tonne, before running the plant.\n\n"
+    "**Amber line:** this year. **Grey band:** the range of the five previous years, month by "
+    "month; the dotted line is their median. **Thin grey line:** roll and delivery sessions.\n\n"
+    "Higher than most days means crushing pays well now. It says nothing about where it goes "
+    "next."
 )
-PNL_HEAD = (
-    "**Unadjusted P&L, one contract.** Steps are realised at each exit. "
-    "The dotted line marks an open position at the window end."
+VALUE_RAIL = (
+    "## Why oil matters more now\n\n"
+    "A tonne of soybeans yields about 0.73 t of meal and 0.18 t of oil. Oil is the smaller "
+    "volume, but demand from biodiesel and renewable diesel can make it half of the value.\n\n"
+    "**Blue:** oil value. **Pink:** meal value. **White:** soybean cost. The margin is blue plus "
+    "pink minus white."
 )
-RATIO_HELP = (
-    "#### How to read a ratio\n\n"
-    "A ratio compares two markets. A high z-score says the first leg is expensive against the "
-    "second compared with the past year, not that it will fall.\n\n"
-    "**Z-score beyond +/-2** is unusual. **Percentile** puts the level in a 5-year context.\n\n"
-    "Rolls move ratios, so a jump may be a contract change, not news."
+FEEDSTOCK_RAIL = (
+    "## Oil as a fuel feedstock\n\n"
+    "About 0.90 t of soybean oil makes 1 m³ of biodiesel. Heating oil stands in for the diesel "
+    "it replaces.\n\n"
+    "A positive gap means the oil costs more than the fuel it replaces, so producers lean on "
+    "blending mandates and credits. A narrow gap means cheap feedstock for fuel.\n\n"
+    f"Biodiesel holds about 7% less energy than diesel per unit of volume "
+    f"([AFDC]({AFDC_URL})); the gap compares volumes."
 )
-METHOD_NUMBERS = (
-    "#### What the numbers mean\n\n"
-    "**Position:** long means the rule holds one contract, flat means none. "
-    "**Round trips:** completed buy and sell pairs; under 30, treat with caution. "
-    "**Time in market:** share of sessions held long. "
-    "**Unadjusted P&L:** USD on one contract, rolls included."
+METHOD_FORMULA = (
+    "## How it is calculated\n\n"
+    "**Crush margin** = 0.733 × meal + 0.183 × oil − soybeans, in USD per tonne of soybeans. "
+    "The yields are the CME board crush convention, 44 lb of meal and 11 lb of oil per 60 lb "
+    "bushel; in CME units it is 0.022 × meal + 0.11 × oil − soybeans, in USD per bushel "
+    f"([CME guide]({CME_GUIDE_URL})). **Feedstock cost** = 0.90 t of oil per m³ of biodiesel, "
+    f"from EIA plant data averaging 7.5 lb per gallon ([farmdoc daily]({FARMDOC_URL}))."
 )
-METHOD_TEST = (
-    "#### How the test runs\n\n"
-    "Signals use the close of day T and fill at the close of T+1, so a rule cannot trade on the "
-    "price that fired it. One contract, long or flat, starting flat. Commission and slippage are "
-    "on by default; change them under Costs."
+METHOD_ROLLS = (
+    "## Rolls and delivery\n\n"
+    "A roll is the switch to the next contract. These series stay in the nearest contract until "
+    "its last trading day, so they trade through the delivery period and then jump. A trader "
+    "who does not take delivery would roll earlier. Sessions in a delivery period, or on the day "
+    "of a switch, are drawn grey and left out of every range and percentile: about 4 in 10 "
+    "sessions for the crush. From mid-September to mid-December the front months are not the "
+    "standard board pair; those sessions are kept, because they move like the rest, but their "
+    "level includes a product calendar spread."
 )
 METHOD_LIMITS = (
-    "#### What it does not show\n\n"
-    "No edge: every result is in-sample, and neither rule has been shown to beat holding the "
-    "front month from 2000 to 2026. Risk metrics stay off until the engine has a daily ledger. "
-    f"[Known issues]({REPOSITORY_URL}/milestone/1)."
+    "## What it leaves out\n\n"
+    "Plant running costs, energy, freight and local basis; biofuel credits and blending "
+    "mandates; later contracts on the curve. Prices are unadjusted futures closes, and the "
+    "contract calendars ignore exchange holidays, so a flag can be one session off. "
+    f"[Source and known issues]({REPOSITORY_URL})."
 )
 
 
@@ -203,377 +187,186 @@ def _load_prices() -> LoadResult:
 
 
 # ---------------------------------------------------------------------------
-# Controls
+# Formatting
 # ---------------------------------------------------------------------------
 
 
-def _period_control(bounds: tuple[datetime.date, datetime.date]) -> tuple[str, object, object]:
-    """Render Period, plus Start and End when it is Custom. Call inside the control bar."""
-    period = st.selectbox(
-        "Period",
-        PERIODS,
-        index=PERIODS.index(DEFAULT_PERIOD),
-        key="period",
-        width="stretch",
-        persist_state="session",
+def _usd(value: float, unit: str, signed: bool = False) -> str:
+    sign = "-" if round(value) < 0 else ("+" if signed and round(value) > 0 else "")
+    return f"{sign}${abs(value):,.0f}/{unit}"
+
+
+def _markdown(text: str) -> None:
+    """Render markdown with dollar signs escaped: st.markdown reads a pair of them as LaTeX."""
+    st.markdown(text.replace("$", "\\$"))
+
+
+def _rank(reading: Reading) -> str:
+    return "n/a" if reading.percentile is None else f"{reading.percentile:.0f}%"
+
+
+def _rank_clause(reading: Reading) -> str:
+    if reading.percentile is None:
+        return "with too little clean history to rank"
+    return f"higher than {reading.percentile:.0f}% of clean days in the past 5 years"
+
+
+def _older_note(reading: Reading) -> str:
+    if reading.date == reading.latest_date:
+        return ""
+    return (
+        f" The latest close, {reading.latest_date.date()}, falls in a roll or delivery window, "
+        f"so the reading uses {reading.date.date()}."
     )
-    if period != "Custom":
-        return period, None, None
-
-    first, last = bounds
-    start = st.date_input(
-        "Start",
-        value=min(max(DEFAULT_CUSTOM_START, first), last),
-        min_value=first,
-        max_value=last,
-        key="custom_start",
-        width="stretch",
-        persist_state="session",
-    )
-    end = st.date_input(
-        "End",
-        value=min(max(DEFAULT_CUSTOM_END, first), last),
-        min_value=first,
-        max_value=last,
-        key="custom_end",
-        width="stretch",
-        persist_state="session",
-    )
-    return period, start, end
 
 
-def _resolve_window(
-    period: str,
-    custom_start: object,
-    custom_end: object,
-    series: pd.Series | pd.DataFrame,
-) -> tuple[datetime.date, datetime.date] | None:
-    """Return the window for a period, or None after warning about an invalid custom one."""
-    if period == "Custom":
-        if not isinstance(custom_start, datetime.date) or not isinstance(custom_end, datetime.date):
-            st.warning("Pick a start and an end date.", icon=":material/warning:")
-            return None
-        if custom_start >= custom_end:
-            st.warning("Start must be before End.", icon=":material/warning:")
-            return None
-        return custom_start, custom_end
-
-    last = pd.Timestamp(series.index[-1])
-    if period == "All":
-        return pd.Timestamp(series.index[0]).date(), last.date()
-    return (last - pd.DateOffset(years=int(period[:-1]))).date(), last.date()
+def _window(series: pd.Series | pd.DataFrame, window: str) -> pd.Series | pd.DataFrame:
+    if window == "All" or series.empty:
+        return series
+    start = pd.Timestamp(series.index[-1]) - pd.DateOffset(years=int(window[:-1]))
+    return series.loc[start:]
 
 
-def _kpi(
-    key: str, label: str, value: str, delta: str, caption: str, help: str | None = None
-) -> None:
+def _share_years_before(table: pd.DataFrame, date: pd.Timestamp, years: int) -> float | None:
+    clean = table.loc[~table["flagged"].astype(bool), "oil_share"]
+    earlier = clean.loc[: date - pd.DateOffset(years=years)]
+    return None if earlier.empty else float(earlier.iloc[-1])
+
+
+# ---------------------------------------------------------------------------
+# Sections
+# ---------------------------------------------------------------------------
+
+
+def _kpi(key: str, label: str, value: str, delta: str, caption: str) -> None:
     with st.container(key=f"card-kpi-{key}"):
-        st.metric(label, value, delta=delta, help=help, **METRIC_STYLE)
+        st.metric(label, value, delta=delta, **METRIC_STYLE)
         st.caption(caption)
 
 
-def _period_label(period: str, window: tuple[datetime.date, datetime.date]) -> str:
-    return f"{window[0]} to {window[1]}" if period == "Custom" else period
-
-
-# ---------------------------------------------------------------------------
-# Backtest view
-# ---------------------------------------------------------------------------
-
-
-def _render_backtest(
-    prices: pd.DataFrame,
-    bounds: tuple[datetime.date, datetime.date],
-    controls: DeltaGenerator,
-) -> None:
-    with controls:
-        market = st.selectbox(
-            "Market", MARKETS, key="market", width="stretch", persist_state="session"
-        )
-        rule_label = st.selectbox(
-            "Rule",
-            list(RULE_KEY_BY_LABEL),
-            key="rule",
-            width="stretch",
-            help=RULE_HELP,
-            persist_state="session",
-        )
-        period, custom_start, custom_end = _period_control(bounds)
-        with st.popover("Costs", width="content"):
-            commission = st.number_input(
-                "Commission per fill (USD)",
-                min_value=0.0,
-                max_value=100.0,
-                value=2.5,
-                step=0.5,
-                key="commission",
-                persist_state="session",
-            )
-            slippage = st.number_input(
-                "Slippage per fill (%)",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.05,
-                step=0.01,
-                key="slippage",
-                persist_state="session",
-            )
-
-    rule = RULE_KEY_BY_LABEL[rule_label]
-    series = prices[market].dropna() if market in prices else pd.Series(dtype=float)
-    if series.empty:
-        st.warning(f"No {market} prices are available.", icon=":material/warning:")
-        return
-
-    window = _resolve_window(period, custom_start, custom_end, series)
-    if window is None:
-        return
-
-    try:
-        result = run_backtest(rule, market, window[0], window[1], prices, commission, slippage)
-    except BacktestError:
-        st.warning(f"No {market} prices in this window.", icon=":material/warning:")
-        return
-
-    at_latest_close = result.window.index[-1] == series.index[-1]
-    left, right = st.container(key="readrow").columns([3, 2], gap="small", vertical_alignment="top")
-    with left:
-        _backtest_metrics(result, rule, at_latest_close)
-    with right:
-        st.warning(BACKTEST_WARNING, icon=":material/info:")
-
-    unit = COMMODITY_UNITS[market]
-    head = _price_head(result, market, rule_label, _period_label(period, window), unit)
-    with st.container(key="chartrow"):
-        main, rail = st.columns([3, 1], gap="small", vertical_alignment="top")
-        with main, st.container(key="card-chart"):
-            price_tab, pnl_tab, log_tab = st.tabs(
-                ["Price and signals", "Unadjusted P&L", "Trade log"]
-            )
-            with price_tab:
-                with st.container(key="charthead"):
-                    st.markdown(head)
-                st.plotly_chart(
-                    price_signals_figure(result.window, result.trades, unit),
-                    width="stretch",
-                    key="price_chart",
-                    theme=None,
-                )
-                if markers_hidden(result.trades):
-                    st.caption(
-                        f"{len(result.trades)} fills: markers hidden, "
-                        "toggle them in the legend or zoom in."
-                    )
-            with pnl_tab:
-                with st.container(key="charthead-pnl"):
-                    st.markdown(PNL_HEAD)
-                st.plotly_chart(
-                    unadjusted_pnl_figure(result.trades, result.window, result.mtm),
-                    width="stretch",
-                    key="pnl_chart",
-                    theme=None,
-                )
-            with log_tab:
-                _trade_log(result.trades, unit, f"{market}_{rule}_{window[0]}_{window[1]}")
-        with rail, st.container(key="card-rail-rules"):
-            st.markdown(_rules_rail(rule_label))
-
-    with st.container(key="method", horizontal=True, gap="small"):
-        for name, body in (("m1", METHOD_NUMBERS), ("m2", METHOD_TEST), ("m3", METHOD_LIMITS)):
-            with st.container(key=f"card-{name}"):
-                st.markdown(body)
-
-    with st.expander("Indicative statistics"):
-        if result.sharpe is not None:
-            st.metric(
-                "Sharpe",
-                f"{result.sharpe:.2f}",
-                delta="unadjusted, incl. rolls",
-                **METRIC_STYLE,
-            )
-        else:
-            st.caption(
-                f"Sharpe needs the daily ledger for a rule with {result.summary.round_trips} "
-                "round trips in this window, so it is not shown."
-            )
-
-
-def _backtest_metrics(result: BacktestResult, rule: str, at_latest_close: bool) -> None:
-    summary = result.summary
-    show_few_trades = rule != "buy_hold" and summary.round_trips < FEW_TRADES_BELOW
-    with st.container(key="kpis", horizontal=True, gap="small"):
-        _kpi(
-            summary.position.lower(),
-            "Position now" if at_latest_close else "Position at end",
-            summary.position,
-            f"since {summary.since}" if summary.since else "no fills",
-            "Does the rule hold a contract at the "
-            + ("last close?" if at_latest_close else "window end?"),
-        )
-        _kpi(
-            "rt",
-            "Round trips",
-            str(summary.round_trips),
-            f"{summary.fills} fill" + ("" if summary.fills == 1 else "s"),
-            "Completed buy and sell pairs.",
-            help="Few trades: treat with caution." if show_few_trades else None,
-        )
-        _kpi(
-            "tim",
-            "Time in market",
-            f"{summary.time_in_market * 100:.0f}%",
-            "of the window",
-            "Share of sessions the rule was long.",
-        )
-        _kpi(
-            "pnl",
-            "Unadjusted P&L",
-            _usd(summary.unadjusted_pnl),
-            "per contract, incl. rolls",
-            "Profit or loss in USD, with no roll adjustment.",
-        )
-
-
-def _price_head(
-    result: BacktestResult, market: str, rule_label: str, period_label: str, unit: str
-) -> str:
-    title = f"**{market}, {period_label}.**"
-    action = (
-        f"No fills: {rule_label} stayed flat."
-        if result.trades.empty
-        else f"Amber while {rule_label} is long, grey while flat."
-    )
-    close = float(result.window.iloc[-1])
-    price = f"{close:,.0f}" if abs(close) >= 100 else f"{close:,.2f}"
-    return f"{title} {action} Close {price} {unit} on {result.window.index[-1].date()}."
-
-
-def _rules_rail(selected: str) -> str:
-    rules = "\n\n".join(
-        f"**{rule.label}**{' :orange-badge[Selected]' if rule.label == selected else ''}  \n"
-        f"{rule.description}"
-        for rule in RULES
-    )
-    return f"#### The three rules\n\n{rules}\n\n#### Reading the chart\n\n{CHART_KEY_HELP}"
-
-
-def _trade_log(trades: pd.DataFrame, unit: str, file_stem: str) -> None:
-    if trades.empty:
-        st.caption("No fills in this window.")
-        return
-
-    price_label = f"Price ({unit})"
-    log = trades.reset_index()[["date", "position", "trade_price", "pnl_usd", "pnl_usd_cumsum"]]
-    log.columns = ["Date", "Position", price_label, "P&L (USD)", "Cumulative (USD)"]
-    st.dataframe(
-        log,
-        hide_index=True,
-        width="stretch",
-        height=380,
-        column_config={
-            "Date": st.column_config.DateColumn(format="YYYY-MM-DD"),
-            price_label: st.column_config.NumberColumn(format="%.2f"),
-            "P&L (USD)": st.column_config.NumberColumn(format="%.0f"),
-            "Cumulative (USD)": st.column_config.NumberColumn(format="%.0f"),
-        },
-    )
-    st.download_button(
-        "Download trades (CSV)",
-        data=lambda: log.to_csv(index=False),
-        file_name=f"trades_{file_stem}.csv".replace(" ", "_"),
-        mime="text/csv",
-        on_click="ignore",
-        key="download_trades",
-    )
-
-
-def _usd(value: float) -> str:
-    sign = "-" if round(value) < 0 else ""
-    return f"{sign}${abs(value):,.0f}"
-
-
-# ---------------------------------------------------------------------------
-# Ratio monitor view
-# ---------------------------------------------------------------------------
-
-
-def _render_monitor(
-    prices: pd.DataFrame,
-    bounds: tuple[datetime.date, datetime.date],
-    controls: DeltaGenerator,
-) -> None:
-    with controls:
-        pair = st.selectbox(
-            "Pair", list(RATIO_PAIRS), key="pair", width="stretch", persist_state="session"
-        )
-        period, custom_start, custom_end = _period_control(bounds)
-
-    first_leg, second_leg = RATIO_PAIRS[pair]
-    has_legs = first_leg in prices and second_leg in prices
-    ratio = (
-        ratio_series(prices, first_leg, second_leg, tons_conversion)
-        if has_legs
-        else pd.Series(dtype=float)
-    )
-    if ratio.empty:
-        st.warning(f"No {pair} data is available.", icon=":material/warning:")
-        return
-
-    window = _resolve_window(period, custom_start, custom_end, ratio)
-    if window is None:
-        return
-
-    start, end = str(window[0]), str(window[1])
-    history = ratio.loc[:end]
-    shown = history.loc[start:]
-    if shown.empty:
-        st.warning(f"No {pair} data in this window.", icon=":material/warning:")
-        return
-
-    snapshot = ratio_snapshot(history)
+def _summary(crush: Reading, share: Reading | None, gap: Reading | None) -> None:
     left, right = st.container(key="readrow").columns([3, 2], gap="small", vertical_alignment="top")
     with left, st.container(key="kpis", horizontal=True, gap="small"):
         _kpi(
-            "hero",
-            "Z-score",
-            "n/a" if snapshot.z is None else f"{snapshot.z:+.2f}",
-            "trailing 1y",
-            "Distance from the 1-year mean, in standard deviations.",
+            "crush",
+            "Crush margin",
+            _usd(crush.value, "t"),
+            f"on {crush.date.date()}",
+            "Meal and oil value minus soybean cost, per tonne.",
         )
         _kpi(
-            "p",
-            "Percentile",
-            "n/a" if snapshot.percentile is None else f"{snapshot.percentile:.0f}",
-            "trailing 5y",
-            "Share of the past 5 years below this level.",
+            "rank",
+            "Against 5 years",
+            _rank(crush),
+            "of clean days were lower",
+            "Roll and delivery sessions left out.",
         )
         _kpi(
-            "l",
-            "Level",
-            f"{snapshot.level:.3f}",
-            "USD/MT basis",
-            "First leg over second, both in USD per metric ton.",
-            help=f"Ratio at the close of {snapshot.as_of}.",
+            "oil",
+            "Oil share",
+            "n/a" if share is None else f"{share.value:.0%}",
+            "of the product value",
+            "Oil's part of what a tonne of soybeans yields.",
+        )
+        _kpi(
+            "gap",
+            "Soy oil vs diesel",
+            "n/a" if gap is None else _usd(gap.value, "m³", signed=True),
+            "per m³ of biodiesel",
+            "Oil feedstock cost minus heating oil, before credits.",
         )
     with right:
-        st.info(MONITOR_WARNING, icon=":material/info:")
+        st.warning(WARNING, icon=":material/info:")
 
-    stats = rolling_stats(history).loc[start:]
+
+def _margin_section(table: pd.DataFrame, crush: Reading, window: str) -> None:
     head = (
-        f"**{pair}, {_period_label(period, window)}.** Last {snapshot.level:.3f} on "
-        f"{snapshot.as_of}. Below, the z-score: brighter beyond +/-2."
+        f"**Soybean crush margin: {_usd(crush.value, 't')} "
+        f"(${crush.value / BUSHELS_PER_TONNE:,.2f}/bu) on {crush.date.date()}, {_rank_clause(crush)}.**"
+        f"{_older_note(crush)}"
     )
-    with st.container(key="chartrow"):
+    year = crush.date.year
+    band = monthly_band(table["crush"], table["flagged"], year)
+    shown = _window(table, window)
+    with st.container(key="row-margin"):
         main, rail = st.columns([3, 1], gap="small", vertical_alignment="top")
-        with main, st.container(key="card-chart"):
-            with st.container(key="charthead"):
-                st.markdown(head)
+        with main, st.container(key="card-margin"):
+            with st.container(key="head-margin"):
+                _markdown(head)
+            seasonal_tab, history_tab = st.tabs([f"{year} against the past 5 years", "History"])
+            with seasonal_tab:
+                st.plotly_chart(
+                    seasonal_figure(table["crush"], table["flagged"], band, year),
+                    width="stretch",
+                    key="seasonal_chart",
+                    theme=None,
+                )
+            with history_tab:
+                st.plotly_chart(
+                    history_figure(shown["crush"], shown["flagged"], "USD per tonne of soybeans"),
+                    width="stretch",
+                    key="history_chart",
+                    theme=None,
+                )
+        with rail, st.container(key="card-rail-margin"):
+            st.markdown(MARGIN_RAIL)
+
+
+def _value_section(table: pd.DataFrame, share: Reading, window: str) -> None:
+    before = _share_years_before(table, share.date, 5)
+    against = "" if before is None else f", against {before:.0%} five years earlier"
+    head = (
+        f"**Oil is {share.value:.0%} of the product value on {share.date.date()}{against}.** "
+        "Meal and oil value per tonne crushed, against the soybean cost."
+    )
+    shown = _window(table, window)
+    with st.container(key="row-value"):
+        main, rail = st.columns([3, 1], gap="small", vertical_alignment="top")
+        with main, st.container(key="card-value"):
+            with st.container(key="head-value"):
+                _markdown(head)
+            st.plotly_chart(value_figure(shown), width="stretch", key="value_chart", theme=None)
+            st.plotly_chart(oil_share_figure(shown), width="stretch", key="share_chart", theme=None)
+        with rail, st.container(key="card-rail-value"):
+            st.markdown(VALUE_RAIL)
+
+
+def _feedstock_section(table: pd.DataFrame, gap: Reading, window: str) -> None:
+    row = table.loc[gap.date]
+    side = "above" if gap.value >= 0 else "below"
+    head = (
+        f"**Soybean oil costs {_usd(row['feedstock'], 'm³')} of biodiesel on {gap.date.date()}, "
+        f"{_usd(abs(gap.value), 'm³')} {side} heating oil.** The gap is "
+        f"{_rank_clause(gap).replace('higher than', 'wider than')}."
+        f"{_older_note(gap)}"
+    )
+    shown = _window(table, window)
+    with st.container(key="row-feedstock"):
+        main, rail = st.columns([3, 1], gap="small", vertical_alignment="top")
+        with main, st.container(key="card-feedstock"):
+            with st.container(key="head-feedstock"):
+                _markdown(head)
             st.plotly_chart(
-                ratio_figure(shown, stats), width="stretch", key="ratio_chart", theme=None
+                feedstock_figure(shown), width="stretch", key="feedstock_chart", theme=None
             )
-            st.plotly_chart(zscore_figure(stats), width="stretch", key="zscore_chart", theme=None)
-        with rail, st.container(key="card-rail-mon"):
-            st.markdown(RATIO_HELP)
+            gap_chart = history_figure(
+                shown["gap"],
+                shown["flagged"],
+                "Gap, USD per m³",
+                color=INK_SERIES,
+                name="Soy oil minus heating oil",
+                height=220,
+            )
+            st.plotly_chart(gap_chart, width="stretch", key="gap_chart", theme=None)
+        with rail, st.container(key="card-rail-feedstock"):
+            st.markdown(FEEDSTOCK_RAIL)
+
+
+def _method() -> None:
+    with st.container(key="method", horizontal=True, gap="small"):
+        for name, body in (("m1", METHOD_FORMULA), ("m2", METHOD_ROLLS), ("m3", METHOD_LIMITS)):
+            with st.container(key=f"card-{name}"):
+                st.markdown(body)
 
 
 # ---------------------------------------------------------------------------
@@ -588,47 +381,74 @@ def _data_line(loaded: LoadResult) -> str:
     return f"{DATA_SOURCE}, 2000 to {loaded.as_of}{freshness}."
 
 
+def _footer(loaded: LoadResult) -> None:
+    data = ""
+    if loaded.prices is not None:
+        freshness = " (may be out of date)" if loaded.is_stale else ""
+        data = f"Data to {loaded.as_of}{freshness}. "
+    st.caption(
+        f"{data}Personal project, not affiliated with any employer. Not investment advice. "
+        f"[Source code]({REPOSITORY_URL})"
+    )
+
+
 def main() -> None:
     st.set_page_config(
-        page_title="Commodity Backtester",
+        page_title="Soybean Crush Margin",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
     st.html(APP_CSS)
     loaded = _load_prices()
-    st.html(HERO_HTML.format(data_line=_data_line(loaded)))
+    st.html(
+        HERO_HTML.format(
+            data_line=_data_line(loaded), linkedin=LINKEDIN_URL, repository=REPOSITORY_URL
+        )
+    )
 
     if loaded.prices is None:
-        st.error(f"Prices could not be loaded. {loaded.error}", icon=":material/warning:")
+        # A failure is a value, so st.cache_data would keep it for an hour. Clear it.
+        _load_prices.clear()
+        st.error(LOAD_ERROR, icon=":material/warning:")
         if st.button("Retry"):
-            _load_prices.clear()
             st.rerun()
-        st.caption(f"[Source code]({REPOSITORY_URL}) · educational use")
+        _footer(loaded)
         return
 
-    with st.container(key="card-controls"):
-        st.markdown(START_HERE)
-        controls = st.container(
-            key="controls", horizontal=True, vertical_alignment="bottom", gap="small"
+    crush = crush_table(loaded.prices)
+    crush_reading = latest_reading(crush["crush"], crush["flagged"])
+    if crush_reading is None:
+        st.warning(
+            "Soybean, meal or oil prices are missing, so the crush margin cannot be computed.",
+            icon=":material/warning:",
         )
-        with controls:
-            view = st.segmented_control(
-                "View",
-                VIEWS,
-                default=VIEWS[0],
-                key="view",
-                required=True,
-                label_visibility="collapsed",
-            )
-    bounds = (loaded.prices.index.min().date(), loaded.prices.index.max().date())
-    render = _render_backtest if view == VIEWS[0] else _render_monitor
-    render(loaded.prices, bounds, controls)
+        _footer(loaded)
+        return
 
-    freshness = " (may be out of date)" if loaded.is_stale else ""
-    st.caption(
-        "Daily closes, fills at next close, one contract. "
-        f"Data to {loaded.as_of}{freshness}. [Source code]({REPOSITORY_URL}) · educational use"
+    gap = gap_table(loaded.prices)
+    share_reading = latest_reading(crush["oil_share"], crush["flagged"])
+    gap_reading = latest_reading(gap["gap"], gap["flagged"])
+
+    _summary(crush_reading, share_reading, gap_reading)
+    window = st.segmented_control(
+        "History window for the charts below",
+        WINDOWS,
+        default=DEFAULT_WINDOW,
+        key="window",
+        required=True,
     )
+    _margin_section(crush, crush_reading, window)
+    if share_reading is not None:
+        _value_section(crush, share_reading, window)
+    if gap_reading is None:
+        st.warning(
+            "Soybean oil or heating oil prices are missing, so the feedstock gap is not shown.",
+            icon=":material/warning:",
+        )
+    else:
+        _feedstock_section(gap, gap_reading, window)
+    _method()
+    _footer(loaded)
 
 
 main()
