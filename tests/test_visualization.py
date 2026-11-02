@@ -15,19 +15,21 @@ from src.visualization import (
     AXIS,
     ENTRY,
     EXIT,
+    FLAT,
     GRID,
     INK_SERIES,
     LONG_BAND,
     MAX_VISIBLE_MARKERS,
     MUTED,
     REFERENCE,
+    SURFACE,
     price_signals_figure,
     ratio_figure,
     unadjusted_pnl_figure,
     zscore_figure,
 )
 
-TOKENS = {INK_SERIES, MUTED, GRID, AXIS, ENTRY, EXIT, LONG_BAND, REFERENCE}
+TOKENS = {SURFACE, INK_SERIES, MUTED, GRID, AXIS, ENTRY, EXIT, FLAT, LONG_BAND, REFERENCE}
 HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
 
 
@@ -62,7 +64,7 @@ def _y_axes(fig) -> list[str]:
 
 
 def _hex_colors(fig) -> set[str]:
-    """Hex colors the figure itself sets, leaving out the plotly_white template."""
+    """Hex colors the figure itself sets, leaving out the template."""
     spec = fig.to_plotly_json()
     spec["layout"].pop("template", None)
     return set(HEX.findall(str(spec)))
@@ -110,8 +112,44 @@ class TestPriceSignals:
     def test_no_fills_shows_price_only(self) -> None:
         empty = pd.DataFrame(columns=["trade_price", "position", "quantity", "VaR_95"])
         fig = price_signals_figure(_window(), empty, "cents/bushel")
-        assert len(fig.data) == 1
+        assert [trace.name for trace in fig.data] == ["Soybean", "Last close"]
+        assert fig.data[0].line.color == FLAT
         assert len(fig.layout.shapes) == 0
+
+    def test_long_and_flat_cover_the_window_and_join(self) -> None:
+        window = _window()
+        trades = _trades(window, 4)
+        fig = price_signals_figure(window, trades, "u")
+        long_y = pd.Series(_trace(fig, "Long").y, index=window.index)
+        flat_y = pd.Series(_trace(fig, "Flat").y, index=window.index)
+        assert (long_y.notna() | flat_y.notna()).all()
+        for fill in trades.index:
+            assert pd.notna(long_y[fill]) and pd.notna(flat_y[fill])
+
+    def test_line_follows_the_position_between_fills(self) -> None:
+        window = _window()
+        trades = _trades(window, 2)
+        entry, leave = trades.index
+        fig = price_signals_figure(window, trades, "u")
+        long_y = pd.Series(_trace(fig, "Long").y, index=window.index)
+        flat_y = pd.Series(_trace(fig, "Flat").y, index=window.index)
+        assert pd.isna(long_y.iloc[0])
+        inside = window.index[(window.index > entry) & (window.index < leave)]
+        assert long_y[inside].notna().all()
+        assert flat_y[inside].isna().all()
+
+    def test_open_position_stays_long_to_the_end(self) -> None:
+        window = _window()
+        fig = price_signals_figure(window, _trades(window, 3), "u")
+        assert pd.notna(_trace(fig, "Long").y[-1])
+        assert _trace(fig, "Last close").marker.color == ENTRY
+
+    def test_last_close_is_flat_after_an_exit(self) -> None:
+        window = _window()
+        fig = price_signals_figure(window, _trades(window, 2), "u")
+        last = _trace(fig, "Last close")
+        assert last.marker.color == FLAT
+        assert last.y[0] == window.iloc[-1]
 
     def test_markers_visible_at_limit(self) -> None:
         window = _window()
@@ -220,6 +258,14 @@ class TestMonitorFigures:
         assert sorted(shape.y0 for shape in fig.layout.shapes) == [-2, 2]
         assert all(shape.line.color == REFERENCE for shape in fig.layout.shapes)
         assert fig.layout.height == 180
+
+    def test_beyond_trace_only_outside_two_and_its_neighbours(self, stats: pd.DataFrame) -> None:
+        fig = zscore_figure(stats)
+        beyond = pd.Series(_trace(fig, "Beyond +/-2").y, index=stats.index)
+        z = stats["z"]
+        assert beyond[z.abs() > 2].notna().all()
+        neighbour = (z.abs().shift(1) > 2) | (z.abs().shift(-1) > 2)
+        assert beyond[(z.abs() <= 2) & ~neighbour].isna().all()
 
     def test_both_charts_share_the_x_range(self, stats: pd.DataFrame) -> None:
         ratio = stats["mean_1y"] * 1.01

@@ -7,6 +7,7 @@ import datetime
 import itertools
 import json
 import re
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,7 +17,7 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from src import config
+from src import config, visualization
 from src.catalog import RULES
 from src.constants import RATIO_PAIRS, commodities_dict
 from src.runner import run_backtest
@@ -205,6 +206,77 @@ class TestFirstLoad:
 
 
 # ---------------------------------------------------------------------------
+# Introduction
+# ---------------------------------------------------------------------------
+
+
+class TestIntroduction:
+    def test_intro_is_visible(self, app) -> None:
+        app.run()
+        hero = " ".join(element.proto.body for element in app.get("html"))
+        for text in (
+            "Pick a market",
+            "Pick a rule",
+            "Read the result",
+            "Diego Rossi",
+            "Grupo Oleoplan",
+            "Yahoo Finance",
+        ):
+            assert text in hero
+
+    def test_start_here_is_visible(self, app) -> None:
+        app.run()
+        assert any("Start here" in block.value for block in app.markdown)
+
+    def test_every_rule_is_explained_without_a_click(self, app) -> None:
+        app.run()
+        visible = " ".join(block.value for block in app.markdown)
+        for rule in RULES:
+            assert rule.description in visible
+
+    def test_selected_rule_is_marked_once(self, app) -> None:
+        app.run()
+        app.selectbox(key="rule").set_value("Donchian 20/10").run()
+        rail = next(block.value for block in app.markdown if "The three rules" in block.value)
+        assert rail.count("[Selected]") == 1
+        assert "**Donchian 20/10** :orange-badge[Selected]" in rail
+
+    def test_only_expander_is_the_statistics(self, app) -> None:
+        app.run()
+        assert [expander.label for expander in app.expander] == ["Indicative statistics"]
+
+    def test_study_figures_are_gone(self, app) -> None:
+        """The drawdown study is removed from the app and the README until the daily ledger."""
+        app.run()
+        visible = " ".join(block.value for block in app.markdown)
+        sources = (
+            visible,
+            (ROOT / "app.py").read_text(encoding="utf-8"),
+            (ROOT / "README.md").read_text(encoding="utf-8"),
+        )
+        for text in sources:
+            for figure in ("64%", "26%", "79%"):
+                assert figure not in text
+
+    def test_chart_copy_names_the_colour_on_screen(self) -> None:
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        assert "Amber while" in source
+        assert "turns amber" in source
+        assert "turns blue" not in source
+        assert "Blue while" not in source
+
+    def test_load_failure_keeps_the_intro(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(config, "YFINANCE_RAW", tmp_path / "absent.parquet")
+        st.cache_data.clear()
+        with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
+            at = _new_app().run()
+        hero = " ".join(element.proto.body for element in at.get("html"))
+        assert "Pick a market" in hero
+        assert "None" not in hero
+        st.cache_data.clear()
+
+
+# ---------------------------------------------------------------------------
 # Rules
 # ---------------------------------------------------------------------------
 
@@ -278,12 +350,18 @@ class TestRulesOnScreen:
         assert "Sharpe" not in outside_expander
         assert labels.count("Sharpe") == 1
 
-    def test_how_to_read_escapes_dollars(self, app) -> None:
+    def test_warning_escapes_dollars(self, app) -> None:
         """An unescaped pair of dollar signs would render the text between them as LaTeX."""
         app.run()
-        body = app.expander[1].markdown[0].value
+        body = app.warning[0].value
         assert "-\\$12.5k" in body
         assert "+\\$63k" in body
+
+    def test_warning_keeps_its_three_claims_together(self, app) -> None:
+        app.run()
+        body = app.warning[0].value
+        for claim in ("indicative", "2026-10-27", "Neither rule"):
+            assert claim in body
 
     def test_no_sharpe_gap_limit_in_copy(self) -> None:
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -425,7 +503,7 @@ class TestMonitor:
         app.run()
         _switch_view(app, "Ratio monitor")
         _no_exceptions(app)
-        assert _labels(app) == ["Level", "Z-score", "Percentile"]
+        assert _labels(app) == ["Z-score", "Percentile", "Level"]
         for metric in app.metric:
             assert "P&L" not in metric.label
             assert "P&L" not in metric.delta
@@ -444,7 +522,7 @@ class TestMonitor:
         for pair in RATIO_PAIRS:
             app.selectbox(key="pair").set_value(pair).run()
             _no_exceptions(app)
-            assert _labels(app) == ["Level", "Z-score", "Percentile"]
+            assert _labels(app) == ["Z-score", "Percentile", "Level"]
             assert len(_charts(app)) == 2
             assert _metric(app, "Z-score").value != "n/a"
             assert _metric(app, "Percentile").value != "n/a"
@@ -574,7 +652,7 @@ class TestDamagedCache:
 
         damaged_app.selectbox(key="pair").set_value("Heating Oil / WTI").run()
         _no_exceptions(damaged_app)
-        assert _labels(damaged_app) == ["Level", "Z-score", "Percentile"]
+        assert _labels(damaged_app) == ["Z-score", "Percentile", "Level"]
 
     def test_default_market_damaged_on_first_load(self, tmp_path, monkeypatch, synthetic_prices):
         """Regression: an empty default market raised IndexError on the first screen."""
@@ -647,3 +725,64 @@ class TestSource:
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         assert "unsafe_allow_html" not in source
         assert source.count("<style>") == 1
+        assert "<script" not in source
+
+    def test_charts_use_no_streamlit_theme(self) -> None:
+        """Without theme=None Streamlit silently replaces the axis colours of the figures."""
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        calls = source.count("st.plotly_chart(")
+        assert calls == 4
+        assert source.count("theme=None") == calls
+
+
+def _luminance(color: str) -> float:
+    channels = [int(color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    r, g, b = (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(first: str, second: str) -> float:
+    high, low = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+class TestDarkTheme:
+    """The dark direction was chosen on the condition that it keeps these guarantees."""
+
+    @pytest.fixture()
+    def tokens(self) -> dict[str, str]:
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        return dict(re.findall(r"--(\w+):(#[0-9a-f]{6})", source))
+
+    def test_theme_is_dark_and_matches_the_tokens(self, tokens) -> None:
+        with (ROOT / ".streamlit" / "config.toml").open("rb") as file:
+            theme = tomllib.load(file)["theme"]
+        assert theme["base"] == "dark"
+        assert theme["backgroundColor"] == tokens["page"]
+        assert theme["secondaryBackgroundColor"] == tokens["card"]
+        assert theme["primaryColor"] == tokens["posl"] == visualization.ENTRY
+        assert tokens["card"] == visualization.SURFACE
+
+    @pytest.mark.parametrize(
+        ("text", "surface"),
+        [
+            ("ink", "card"),
+            ("mut", "card"),
+            ("mut", "page"),
+            ("ink", "raised"),
+            ("mut", "raised"),
+            ("onpos", "posl"),
+        ],
+    )
+    def test_text_contrast_is_at_least_aa(self, tokens, text, surface) -> None:
+        assert _contrast(tokens[text], tokens[surface]) >= 4.5
+
+    def test_chart_marks_are_visible_on_the_surface(self) -> None:
+        for color in (visualization.ENTRY, visualization.EXIT, visualization.FLAT):
+            assert _contrast(color, visualization.SURFACE) >= 3
+
+    def test_warning_does_not_borrow_the_position_colour(self) -> None:
+        """Amber means long. A warning in amber would make a long position read as an alert."""
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        rule = re.search(r"\[data-testid='stAlertContainer'\]\{([^}]*)\}", source).group(1)
+        assert "--posl" not in rule

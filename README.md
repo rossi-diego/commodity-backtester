@@ -1,5 +1,9 @@
 # Commodity Backtester
 
+**What does a simple rule say today in grain and energy futures, and how far can you trust it?**
+
+Built by **Diego Rossi**, Market Risk Coordinator at Grupo Oleoplan, Porto Alegre, Brazil · [LinkedIn](https://www.linkedin.com/in/diego-rossi-santanna/) · [Live app](https://commodity-backtester.streamlit.app/)
+
 [![Live App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://commodity-backtester.streamlit.app/)
 [![CI](https://github.com/rossi-diego/commodity-backtester/actions/workflows/ci.yml/badge.svg)](https://github.com/rossi-diego/commodity-backtester/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
@@ -8,7 +12,7 @@
 
 An interactive backtester and ratio monitor for CBOT grain and NYMEX energy futures, built with Python and Streamlit. It runs on daily closes from Yahoo Finance continuous front-month series (from 2000). The app answers one question without a click: what is this rule saying now, in this market, and how far can that number be trusted?
 
-![Backtest view: position, round trips, time in market, unadjusted P&L and the price chart](docs/screenshot.png)
+![Backtest view: three-step introduction, controls, position, indicative P&L with its warning, and the price chart coloured by position](docs/screenshot.png)
 
 > **Data source:** continuous front-month futures via Yahoo Finance (`ZS=F`, `ZC=F`, `KE=F`, `ZM=F`, `ZL=F`, `HO=F`, `CL=F`).
 > See [Known Limitations](#known-limitations) for important notes on roll adjustment.
@@ -26,6 +30,8 @@ An interactive backtester and ratio monitor for CBOT grain and NYMEX energy futu
 ## Features
 
 - **First screen with results** - opens on Soybean, 12M momentum, 10 years, with no button to press
+- **Explains itself** - a three-step introduction, plus the rules and the method in plain words, without opening a menu
+- **Colour shows position** - the price line is amber while the rule holds the contract and grey while it is flat
 - **Three rules** - 12M momentum, Donchian 20/10 and buy & hold as a fixed reference
 - **Ratio monitor** - level, trailing 1-year z-score and trailing 5-year percentile for four curated pairs. No trades and no P&L
 - **Custom windows** - fixed periods by default, or any start and end date to study 2008 or 2020
@@ -33,7 +39,7 @@ An interactive backtester and ratio monitor for CBOT grain and NYMEX energy futu
 - **T+1 execution model** - signals generated at close T are filled at close T+1; no same-bar look-ahead
 - **Trade log** - per-fill log with CSV download
 - **Parquet data cache** - validated before every write, replaced atomically, with a fallback to the existing cache when Yahoo fails
-- **Works on a phone** - no sidebar, and the results appear without opening a menu
+- **Works on a phone** - no sidebar. The introduction, controls, metrics and warning come first, with the chart just below
 
 ---
 
@@ -138,6 +144,7 @@ Each rule is long or flat, one contract, with fixed parameters. They are baselin
 | **Signals on history, then slice** | Signals run on the full history up to the window end and are then cut to the window. A one-year window therefore has a year of momentum history behind it, instead of starting blind. |
 | **Per-instrument series** | Each rule runs on `df[market].dropna()`, not on the shared seven-market frame. A holiday in another market cannot create a NaN that blinds a rolling window for weeks or produces a fill at a missing price. |
 | **P&L is not the headline** | The first metric is the position. On unadjusted prices, the sign of the P&L can disagree with a ledger that removes roll days, so the number is labelled `Unadjusted P&L`, shown last, and comes with a warning. |
+| **Colour shows position, not profit** | Amber means the rule holds the contract, on the card and on the chart. Green and red would turn a position into a verdict, and the warning stays neutral so a long position does not read as an alert. |
 | **Capital-normalised returns** | Daily PnL is divided by the initial contract notional before computing Sharpe. This avoids the ill-defined `pct_change()` of a cumulative PnL series that starts at zero. |
 | **USD/metric-ton normalisation** | Commodities trade in incompatible units (cents/bushel, USD/gallon, USD/barrel). Converting everything to $/MT using CME/CBOT contract specs makes cross-commodity ratios economically meaningful. |
 | **Validated, atomic cache** | A download replaces `data/yfinance_raw.parquet` only if each column has at least 90% of its cached observations and does not end earlier. A partial Yahoo response cannot overwrite good data, and a failed refresh serves the existing cache, labelled as possibly out of date. |

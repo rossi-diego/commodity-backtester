@@ -20,22 +20,24 @@ __all__ = [
 # Design tokens
 # ---------------------------------------------------------------------------
 
-INK_SERIES: Final[str] = "#3b4252"
-MUTED: Final[str] = "#52514e"
-GRID: Final[str] = "#eef0f3"
-AXIS: Final[str] = "#d4d8de"
-ENTRY: Final[str] = "#2a78d6"
-EXIT: Final[str] = "#eb6834"
-LONG_BAND: Final[str] = "#2a78d6"
-LONG_BAND_OPACITY: Final[float] = 0.07
-REFERENCE: Final[str] = "#9aa1ac"
+SURFACE: Final[str] = "#141b23"
+INK_SERIES: Final[str] = "#eef2f6"
+MUTED: Final[str] = "#a3afbd"
+GRID: Final[str] = "#232c37"
+AXIS: Final[str] = "#3b4653"
+ENTRY: Final[str] = "#c58512"
+EXIT: Final[str] = "#4d8fe8"
+FLAT: Final[str] = "#7d8796"
+LONG_BAND: Final[str] = "#c58512"
+LONG_BAND_OPACITY: Final[float] = 0.1
+REFERENCE: Final[str] = "#7d8796"
 
 BACKTEST_HEIGHT: Final[int] = 420
 RATIO_HEIGHT: Final[int] = 300
 ZSCORE_HEIGHT: Final[int] = 180
 # Fixed so the two stacked monitor charts align. With automargin the plot width
 # depends on the width of the tick labels, and the shared dates drift apart.
-MONITOR_RIGHT_MARGIN: Final[int] = 64
+MONITOR_RIGHT_MARGIN: Final[int] = 72
 
 # Above this many fills the markers cover the price, so they start hidden.
 MAX_VISIBLE_MARKERS: Final[int] = 60
@@ -52,14 +54,22 @@ def markers_hidden(trades: pd.DataFrame) -> bool:
 
 
 def price_signals_figure(window: pd.Series, trades: pd.DataFrame, unit: str) -> go.Figure:
-    """Price line with long periods as bands and fills as markers."""
+    """Price line coloured by position, long periods as bands, fills as markers."""
     fig = go.Figure()
-    fig.add_trace(_line(window.index, window, str(window.name)))
-
-    if not trades.empty:
+    if trades.empty:
+        fig.add_trace(_price_line(window, str(window.name), FLAT, 1.5))
+        last_color = FLAT
+    else:
+        state = _long_state(window, trades)
+        previous = state.shift(1, fill_value=False)
+        # Both segments include the session where the position changes, so the line stays joined.
+        fig.add_trace(_price_line(window.where(state | previous), "Long", ENTRY, 2))
+        fig.add_trace(_price_line(window.where(~state | ~previous), "Flat", FLAT, 1.5))
         visible: bool | str = "legendonly" if markers_hidden(trades) else True
         fig.add_trace(_fill_markers(trades, "buy", "Entry", "triangle-up", ENTRY, visible))
         fig.add_trace(_fill_markers(trades, "sell", "Exit", "triangle-down", EXIT, visible))
+        last_color = ENTRY if bool(state.iloc[-1]) else FLAT
+    fig.add_trace(_last_dot(window, last_color, "Last close"))
 
     # Bands go in one list. Calling add_vrect in a loop is quadratic in the band count.
     fig.update_layout(**_layout(BACKTEST_HEIGHT), shapes=_long_bands(trades, window))
@@ -90,7 +100,7 @@ def unadjusted_pnl_figure(
             y=realised,
             mode="lines",
             name="Realised",
-            line={"color": INK_SERIES, "width": 1.5, "shape": "hv"},
+            line={"color": INK_SERIES, "width": 1.75, "shape": "hv"},
         )
     )
 
@@ -102,13 +112,16 @@ def unadjusted_pnl_figure(
                 y=[realised[-1], realised[-1] + float(str(mtm["pnl_usd"]))],
                 mode="lines+markers",
                 name="With open position",
-                line={"color": ENTRY, "width": 1.5, "dash": "dot"},
-                marker={"color": ENTRY, "size": [0, 9], "line": {"color": "white", "width": 1}},
+                line={"color": ENTRY, "width": 1.75, "dash": "dot"},
+                marker={"color": ENTRY, "size": [0, 9], "line": {"color": SURFACE, "width": 2}},
             )
         )
 
     fig.update_layout(**_layout(BACKTEST_HEIGHT))
-    fig.update_yaxes(title="USD, per contract, unadjusted")
+    # The zero line stays because the sign of this series is the point of the warning.
+    fig.update_yaxes(
+        title="USD, per contract, unadjusted", zeroline=True, zerolinecolor=AXIS, zerolinewidth=1
+    )
     return fig
 
 
@@ -122,26 +135,43 @@ def ratio_figure(ratio: pd.Series, stats: pd.DataFrame) -> go.Figure:
             y=stats["mean_1y"],
             mode="lines",
             name="1y mean",
-            line={"color": ENTRY, "width": 1.25, "dash": "dot"},
+            line={"color": ENTRY, "width": 1.5, "dash": "dot"},
         )
     )
+    fig.add_trace(_last_dot(ratio, INK_SERIES, "Last"))
     fig.update_layout(**_layout(RATIO_HEIGHT))
     fig.update_layout(margin_r=MONITOR_RIGHT_MARGIN)
     fig.update_xaxes(range=_date_range(ratio))
-    fig.update_yaxes(title="Ratio, USD/MT basis", automargin=False)
+    fig.update_yaxes(title="Ratio, USD/MT basis", automargin=False, tickformat=".1f")
     return fig
 
 
 def zscore_figure(stats: pd.DataFrame) -> go.Figure:
     """Trailing 1-year z-score with reference lines at +/-2. Same x-axis as the ratio."""
     fig = go.Figure()
-    fig.add_trace(_line(stats.index, stats["z"], "Z-score"))
+    z = stats["z"]
+    fig.add_trace(_line(stats.index, z, "Z-score", FLAT))
+    # Neighbours are included so each stretch beyond +/-2 draws as a closed segment.
+    beyond = (z.abs() > 2) | (z.abs().shift(1) > 2) | (z.abs().shift(-1) > 2)
+    fig.add_trace(
+        go.Scatter(
+            x=stats.index,
+            y=z.where(beyond),
+            mode="lines",
+            name="Beyond +/-2",
+            hoverinfo="skip",
+            line={"color": INK_SERIES, "width": 1.75},
+        )
+    )
+    fig.add_trace(_last_dot(z, INK_SERIES, "Last"))
     for level in (-2, 2):
         fig.add_hline(y=level, line={"color": REFERENCE, "width": 1, "dash": "dot"})
     fig.update_layout(**_layout(ZSCORE_HEIGHT), showlegend=False)
     fig.update_layout(margin_r=MONITOR_RIGHT_MARGIN)
     fig.update_xaxes(range=_date_range(stats))
-    fig.update_yaxes(title="Z-score (1y)", automargin=False)
+    fig.update_yaxes(
+        title="Z-score (1y)", automargin=False, tickformat="+d", zeroline=True, zerolinecolor=AXIS
+    )
     return fig
 
 
@@ -152,25 +182,64 @@ def zscore_figure(stats: pd.DataFrame) -> go.Figure:
 
 def _layout(height: int) -> dict[str, Any]:
     return {
-        "template": "plotly_white",
+        "template": "plotly_dark",
+        "paper_bgcolor": SURFACE,
+        "plot_bgcolor": SURFACE,
         "height": height,
         "margin": {"l": 8, "r": 8, "t": 8, "b": 8},
-        "font": {"family": "Inter, sans-serif", "size": 12, "color": MUTED},
+        "font": {"family": "IBM Plex Sans, sans-serif", "size": 12, "color": MUTED},
         "hovermode": "x unified",
-        "legend": {"orientation": "h", "y": 1.04, "x": 0, "xanchor": "left", "yanchor": "bottom"},
-        "xaxis": {"gridcolor": GRID, "linecolor": AXIS},
-        "yaxis": {"gridcolor": GRID, "zeroline": False, "side": "right"},
+        "legend": {"orientation": "h", "y": 1.02, "x": 0, "xanchor": "left", "yanchor": "bottom"},
+        "xaxis": {"linecolor": AXIS, "showgrid": False, "ticks": "outside", "tickcolor": AXIS},
+        "yaxis": {
+            "gridcolor": GRID,
+            "zeroline": False,
+            "side": "right",
+            "tickformat": ",",
+            "ticklabelstandoff": 8,
+            "title_font": {"size": 11},
+        },
     }
 
 
-def _line(x: Any, y: Any, name: str) -> go.Scatter:
+def _line(x: Any, y: Any, name: str, color: str = INK_SERIES) -> go.Scatter:
     return go.Scatter(
         x=x,
         y=y,
         mode="lines",
         name=name,
-        line={"color": INK_SERIES, "width": 1.5},
+        line={"color": color, "width": 1.5},
     )
+
+
+def _price_line(y: pd.Series, name: str, color: str, width: float) -> go.Scatter:
+    return go.Scatter(
+        x=y.index,
+        y=y,
+        mode="lines",
+        name=name,
+        hovertemplate="%{y:,.2f}",
+        line={"color": color, "width": width},
+    )
+
+
+def _last_dot(series: pd.Series, color: str, name: str) -> go.Scatter:
+    return go.Scatter(
+        x=[series.index[-1]],
+        y=[float(series.iloc[-1])],
+        mode="markers",
+        name=name,
+        showlegend=False,
+        hoverinfo="skip",
+        cliponaxis=False,
+        marker={"size": 9, "color": color, "line": {"color": SURFACE, "width": 2}},
+    )
+
+
+def _long_state(window: pd.Series, trades: pd.DataFrame) -> pd.Series:
+    """Return, for each session of the window, whether the rule holds the contract."""
+    is_buy = (trades["position"] == "buy").groupby(level=0).last()
+    return is_buy.reindex(window.index, method="ffill").fillna(False).astype(bool)
 
 
 def _fill_markers(
@@ -193,7 +262,7 @@ def _fill_markers(
             "symbol": symbol,
             "size": 9,
             "color": color,
-            "line": {"color": "white", "width": 1},
+            "line": {"color": SURFACE, "width": 1},
         },
     )
 
