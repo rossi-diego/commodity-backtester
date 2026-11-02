@@ -41,9 +41,10 @@ METRIC_STYLE = {"delta_color": "off", "delta_arrow": "off"}
 # Amber means "holds the contract" and nothing else, so the warning beside it is not amber.
 # Other alerts keep the theme colours: they replace the results, so they must look different.
 # The rules target Streamlit test ids, so redo the screenshots when upgrading Streamlit.
+# The top padding clears the 56 px bar Streamlit Cloud draws over the app from its parent page.
 APP_CSS = """<style>
 :root{--page:#0b1016;--card:#141b23;--raised:#1e2732;--line:#2a3440;--ink:#eef2f6;--mut:#a3afbd;--head:linear-gradient(115deg,#1a2430 0%,#16212c 55%,#3a2c10 100%);--posl:#c58512;--onpos:#0b1016;--posf:#3d4957;--step:rgba(255,255,255,.07)}
-[data-testid='stMainBlockContainer']{max-width:none;padding:1rem 2rem 2rem}
+[data-testid='stMainBlockContainer']{max-width:none;padding:3.75rem 2rem 2rem}
 .bt-hero{background:var(--head);border-radius:12px;padding:1.1rem 1.5rem;color:#fff;display:grid;grid-template-columns:minmax(0,13fr) minmax(0,11fr);gap:1.5rem;align-items:center}
 .bt-hero h1{color:#fff;font-size:2.25rem;font-weight:600;letter-spacing:-.02em;line-height:1.1;margin:0 0 .4rem;padding:0}
 .bt-q{font-size:1.0625rem;line-height:1.35;margin:0 0 .4rem;color:#fff}
@@ -104,7 +105,7 @@ APP_CSS = """<style>
 [class*='st-key-charthead'] strong{color:var(--ink);font-weight:600}
 @media (max-width:1100px){.st-key-chartrow [data-testid='stColumn']{min-width:100%} .bt-hero{grid-template-columns:1fr;gap:.75rem} .bt-steps span{display:none} [class*='st-key-card-kpi'] [data-testid='stCaptionContainer']{display:none}}
 @media (max-width:640px){
- [data-testid='stMainBlockContainer']{padding:.75rem .75rem 2rem}
+ [data-testid='stMainBlockContainer']{padding:3.75rem .75rem 2rem}
  .bt-hero{padding:1rem;gap:.75rem;border-radius:10px}
  .bt-hero h1{font-size:1.75rem}
  .st-key-card-controls [data-testid='stElementContainer']:has(>[data-testid='stMarkdown']){display:none}
@@ -121,10 +122,8 @@ APP_CSS = """<style>
  .st-key-kpis>div{width:auto!important}
  .st-key-kpis>div:first-child{grid-column:1/-1}
  [class*='st-key-card-kpi'] [data-testid='stCaptionContainer']{display:none}
- .st-key-kpis>div:first-child [data-testid='stCaptionContainer']{display:block}
- .st-key-kpis>div:first-child [data-testid='stElementContainer']:has([data-testid='stCaptionContainer']){min-height:1.1rem}
  .st-key-kpis [data-testid='stMetricValue']{font-size:1.25rem}
- .st-key-card-kpi-long [data-testid='stMetricValue'],.st-key-card-kpi-flat [data-testid='stMetricValue'],.st-key-card-kpi-hero [data-testid='stMetricValue']{font-size:2.5rem}
+ .st-key-card-kpi-long [data-testid='stMetricValue'],.st-key-card-kpi-flat [data-testid='stMetricValue'],.st-key-card-kpi-hero [data-testid='stMetricValue']{font-size:2rem}
  [class*='st-key-card-kpi']{padding:.55rem .6rem}
  [data-testid='stColumn']{min-width:100%}
  .st-key-method{flex-direction:column}
