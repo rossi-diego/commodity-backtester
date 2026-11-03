@@ -20,20 +20,13 @@ from src.seasonal import latest_reading
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
-LABELS = ["Crush margin", "Against 5 years", "Oil share", "Oil cost vs diesel"]
-CHARTS = {
-    "seasonal_chart",
-    "history_chart",
-    "value_chart",
-    "share_chart",
-    "feedstock_chart",
-    "gap_chart",
-}
+SECTIONS = ["crush", "share", "gap"]
+LABELS = ["Crush margin", "Oil share", "Oil cost vs diesel"]
 EMOJI = re.compile("[\U0001f300-\U0001faff☀-➿]")
 
 
 def _new_app() -> AppTest:
-    return AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+    return AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
 
 
 def _cached_app(monkeypatch, tmp_path, frame: pd.DataFrame):
@@ -66,20 +59,28 @@ def app(tmp_path, monkeypatch, synthetic_prices):
     st.cache_data.clear()
 
 
-def _chart_keys(at: AppTest) -> set[str]:
-    return {key for chart in at.get("plotly_chart") for key in CHARTS if key in chart.proto.id}
-
-
-def _markdown(at: AppTest) -> str:
-    return " ".join(block.value for block in at.markdown)
-
-
-def _hero(at: AppTest) -> str:
+def _html(at: AppTest) -> str:
     return " ".join(element.proto.body for element in at.get("html"))
 
 
-def _metric(at: AppTest, label: str):
-    return next(metric for metric in at.metric if metric.label == label)
+def _text(markup: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))
+
+
+def _block(at: AppTest, marker: str) -> str:
+    return next(e.proto.body for e in at.get("html") if marker in e.proto.body)
+
+
+def _kpis(at: AppTest) -> str:
+    return _block(at, 'class="cm-kpis"')
+
+
+def _head(at: AppTest, key: str) -> str:
+    return _text(_block(at, f'id="{key}"'))
+
+
+def _chart(at: AppTest, key: str) -> str:
+    return next(c for c in at.get("plotly_chart") if f"chart-{key}" in c.proto.id).proto.spec
 
 
 def _no_exceptions(at: AppTest) -> None:
@@ -92,26 +93,25 @@ def _no_exceptions(at: AppTest) -> None:
 
 
 class TestFirstLoad:
-    def test_everything_shows_without_a_click(self, app) -> None:
+    def test_three_cards_and_three_charts_without_a_click(self, app) -> None:
         app.run()
         _no_exceptions(app)
-        assert [metric.label for metric in app.metric] == LABELS
-        assert _chart_keys(app) == CHARTS
+        cards = _kpis(app)
+        labels = re.findall(r'class="cm-label"><i>\d</i>([^<]+)', cards)
+        assert [label.strip() for label in labels] == LABELS
+        assert [c.proto.id.rsplit("chart-", 1)[-1] for c in app.get("plotly_chart")] == SECTIONS
         assert not app.button
-        assert not app.selectbox
+        assert not app.metric
 
     def test_headline_matches_the_engine(self, app, synthetic_prices) -> None:
         app.run()
         table = crush_table(synthetic_prices)
         reading = latest_reading(table["crush"], table["flagged"])
-        headline = next(
-            block.value for block in app.markdown if "Soybean crush margin" in block.value
-        )
         sign = "−" if round(reading.value) < 0 else ""
-        assert f"{sign}\\${abs(reading.value):,.0f}/t" in headline
-        assert str(reading.date.date()) in headline
-        assert f"{reading.percentile:.0f}%" in headline
-        assert _metric(app, "Crush margin").value == f"{sign}${abs(reading.value):,.0f}/t"
+        value = f"{sign}${abs(reading.value):,.0f}/t"
+        assert f"{value} on {reading.date.day} {reading.date:%b %Y}" in _head(app, "crush")
+        assert f"{reading.percentile:.0f}%" in _head(app, "crush")
+        assert f">{value}<" in _kpis(app)
 
     def test_no_unescaped_dollar_reaches_markdown(self, app) -> None:
         """Two unescaped dollar signs in one block render the text between them as LaTeX."""
@@ -119,56 +119,54 @@ class TestFirstLoad:
         for block in [*app.markdown, *app.warning, *app.caption]:
             assert not re.search(r"(?<!\\)\$", block.value), block.value
 
-    def test_rin_credit_is_shown_with_its_date_and_source(self, app) -> None:
+    def test_rin_card_is_dated_and_static(self, app) -> None:
         app.run()
         seed = pd.read_csv(config.RIN_SEED)
-        week, price = seed["week"].iloc[-1], seed["usd_per_rin"].iloc[-1]
-        head = next(block.value for block in app.markdown if "soybean oil in 1 m³" in block.value)
-        assert f"latest D4 RIN, \\${price:,.2f} in the week of {week} (EPA, saved copy)" in head
-        assert "After the D4 RIN credit" in app.caption[3].value
-        assert f"D4 RIN prices from EPA to the week of {week}, saved copy." in app.caption[-1].value
+        week = pd.Timestamp(seed["week"].iloc[-1])
+        price = seed["usd_per_rin"].iloc[-1]
+        cards = _text(_kpis(app))
+        assert f"D4 ${price:.2f}, week of {week.day} {week:%b} (EPA, saved copy" in cards
+        assert "With the D4 RIN:" in cards
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        assert _text(_kpis(app)) == cards
+        assert f"D4 RIN prices from EPA to the week of {week.date()}, saved copy." in (
+            app.caption[-1].value
+        )
+
+    def test_rin_toggle_changes_the_chart_and_the_sentence(self, app) -> None:
+        app.run()
+        assert "Oil minus heating oil, USD per m" in _chart(app, "gap")
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        assert "Oil minus heating oil and D4 RIN" in _chart(app, "gap")
+        assert "Before the RIN" in _chart(app, "gap")
+        assert "Oil cost vs diesel With the D4 RIN," in _head(app, "gap")
 
     def test_page_works_without_any_rin_data(self, app, monkeypatch, tmp_path) -> None:
         monkeypatch.setattr(config, "RIN_SEED", tmp_path / "missing.csv")
         app.run()
         _no_exceptions(app)
-        assert any("credit is not shown" in block.value for block in app.markdown)
-        assert "Not the biodiesel price" in app.caption[3].value
+        assert "D4 RIN prices could not be loaded" in _text(_kpis(app))
+        assert app.toggle(key="rin-gap").proto.disabled
 
     def test_negative_values_use_a_typographic_minus(self, app) -> None:
         app.run()
-        caption = app.caption[3].value
-        assert "−\\$" in caption
-        assert "-\\$" not in caption
+        cards = _kpis(app)
+        assert "-$" not in cards
+        assert re.search(r"[−+]\$[\d,.]+/gal", cards)
 
     def test_gap_is_never_presented_as_a_biodiesel_price(self, app) -> None:
         app.run()
-        head = next(block.value for block in app.markdown if "soybean oil in 1 m³" in block.value)
-        assert "not the biodiesel price" in head
-        assert "It is not the biodiesel price" in _markdown(app)
-        assert "oil only" in _metric(app, "Oil cost vs diesel").delta
+        assert "not the biodiesel price" in _html(app)
+        assert "Feedstock only" in _text(_kpis(app))
 
-    def test_warning_names_what_is_left_out(self, app) -> None:
+    def test_scope_names_what_is_left_out(self, app) -> None:
         app.run()
-        warning = app.warning[0].value
-        for text in ("before costs", "D4 RIN", "45Z", "basis", "roll or delivery"):
-            assert text in warning
-
-    def test_window_changes_the_history(self, app) -> None:
-        app.run()
-        before = len(
-            next(c for c in app.get("plotly_chart") if "history_chart" in c.proto.id).proto.spec
-        )
-        app.button_group(key="window").set_value("5Y").run()
-        _no_exceptions(app)
-        after = len(
-            next(c for c in app.get("plotly_chart") if "history_chart" in c.proto.id).proto.spec
-        )
-        assert after < before
-
-    def test_window_control_cannot_be_cleared(self, app) -> None:
-        app.run()
-        assert app.button_group(key="window").proto.required is True
+        hero = _block(app, "cm-hero")
+        for text in ("Gross margins", "D4 RIN", "basis", "rolls or deliveries"):
+            assert text in hero
+        assert not app.warning
 
     def test_footer_dates_the_data_and_disclaims(self, app, synthetic_prices) -> None:
         app.run()
@@ -179,16 +177,62 @@ class TestFirstLoad:
         )
 
 
+class TestControls:
+    @pytest.mark.parametrize("key", SECTIONS)
+    def test_each_chart_has_its_own_window(self, app, key) -> None:
+        app.run()
+        before = {other: len(_chart(app, other)) for other in SECTIONS}
+        assert app.button_group(key=f"win-{key}").proto.required is True
+        app.button_group(key=f"win-{key}").set_value("5Y").run()
+        _no_exceptions(app)
+        assert len(_chart(app, key)) < before[key]
+        for other in set(SECTIONS) - {key}:
+            assert len(_chart(app, other)) == before[other]
+
+    @pytest.mark.parametrize("key", SECTIONS)
+    def test_by_month_compares_years(self, app, key) -> None:
+        app.run()
+        app.button_group(key=f"view-{key}").set_value("By month").run()
+        _no_exceptions(app)
+        year = pd.Timestamp.today().year
+        spec = _chart(app, key)
+        for name in (str(year), str(year - 1), str(year - 2), "averages"):
+            assert f'"name":"{name}' in spec or name in spec
+        assert "against" in _head(app, key) or "too few" in _head(app, key)
+        app.checkbox(key=f"band-{key}").uncheck().run()
+        assert "averages" not in _chart(app, key)
+
+    def test_years_are_capped(self, app) -> None:
+        app.run()
+        app.button_group(key="view-crush").set_value("By month").run()
+        year = pd.Timestamp.today().year
+        app.button_group(key="years-crush").set_value([year - n for n in range(1, 8)]).run()
+        _no_exceptions(app)
+        assert any("Up to 5 years" in caption.value for caption in app.caption)
+        spec = _chart(app, "crush")
+        assert f'"name":"{year - 5}"' in spec
+        assert f'"name":"{year - 6}"' not in spec
+
+    def test_rin_by_month_uses_epa_weeks(self, app) -> None:
+        app.run()
+        app.toggle(key="rin-gap").set_value(True).run()
+        app.button_group(key="view-gap").set_value("By month").run()
+        _no_exceptions(app)
+        assert "RIN months use EPA weeks only" in _block(
+            app, 'cm-rail"><div><h3>What it is</h3><p>About'
+        )
+
+
 class TestIntroduction:
     def test_hero_has_question_steps_and_author(self, app) -> None:
         app.run()
-        hero = _hero(app)
+        hero = _block(app, "cm-hero")
         for text in (
             "Soybean Crush Margin",
             "how much of it is biodiesel",
-            "Today's margin",
-            "Where it comes from",
-            "Oil against diesel",
+            'href="#crush"',
+            'href="#share"',
+            'href="#gap"',
             "Diego Rossi",
             "linkedin.com/in/rossi-diego",
             "Yahoo Finance",
@@ -200,19 +244,13 @@ class TestIntroduction:
             for word in ("Oleoplan", "Inpasa", "Coordinator", "Manager at"):
                 assert word not in text
 
-    def test_every_section_is_explained_beside_its_chart(self, app) -> None:
+    def test_every_chart_is_explained_beside_it_and_method_closes(self, app) -> None:
         app.run()
-        text = _markdown(app)
-        for heading in (
-            "How to read it",
-            "Why oil matters more now",
-            "Oil as a fuel feedstock",
-            "How it is calculated",
-            "Rolls and delivery",
-            "What it leaves out",
-        ):
-            assert heading in text
-        assert not app.expander
+        page = _html(app)
+        assert page.count('class="cm-rail"') == 3
+        for heading in ("How it is calculated", "Rolls and delivery", "What it leaves out"):
+            assert heading in page
+        assert [e.label for e in app.expander] == ["Full methodology and sources"]
 
 
 # ---------------------------------------------------------------------------
@@ -230,11 +268,11 @@ class TestDataStates:
             assert "could not be loaded" in at.error[0].value
             assert "yahoo down" not in at.error[0].value
             assert [button.label for button in at.button] == ["Retry"]
-            assert not at.metric
+            assert 'class="cm-kpis"' not in _html(at)
             first = dl.call_count
             at.button[0].click().run()
             assert dl.call_count > first, "A failed load must not be served from cache."
-        assert "None" not in _hero(at)
+        assert "None" not in _block(at, "cm-hero")
         st.cache_data.clear()
 
     def test_retry_recovers(self, tmp_path, monkeypatch, synthetic_prices) -> None:
@@ -248,7 +286,7 @@ class TestDataStates:
             at.button[0].click().run()
         _no_exceptions(at)
         assert not at.error
-        assert [metric.label for metric in at.metric] == LABELS
+        assert 'class="cm-kpis"' in _html(at)
         st.cache_data.clear()
 
     def test_old_data_labelled(self, tmp_path, monkeypatch, synthetic_prices) -> None:
@@ -256,7 +294,7 @@ class TestDataStates:
         with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
             at.run()
         _no_exceptions(at)
-        assert "2024-06-28 (may be out of date)" in _hero(at)
+        assert "2024-06-28 (may be out of date)" in _block(at, "cm-hero")
         assert "2024-06-28 (may be out of date)" in at.caption[-1].value
         st.cache_data.clear()
 
@@ -268,7 +306,7 @@ class TestDataStates:
             at.run()
         _no_exceptions(at)
         assert any("crush margin cannot be computed" in w.value for w in at.warning)
-        assert not at.metric
+        assert 'class="cm-kpis"' not in _html(at)
         st.cache_data.clear()
 
     def test_missing_diesel_keeps_the_crush(self, tmp_path, monkeypatch, synthetic_prices) -> None:
@@ -279,12 +317,15 @@ class TestDataStates:
             at.run()
         _no_exceptions(at)
         assert any("feedstock gap is not shown" in w.value for w in at.warning)
-        assert _metric(at, "Oil cost vs diesel").value == "n/a"
-        assert "seasonal_chart" in _chart_keys(at)
+        assert "Prices missing." in _kpis(at)
+        assert [c.proto.id.rsplit("chart-", 1)[-1] for c in at.get("plotly_chart")] == [
+            "crush",
+            "share",
+        ]
         st.cache_data.clear()
 
-    def test_reading_says_when_the_latest_close_is_flagged(self, tmp_path, monkeypatch) -> None:
-        """A frame ending inside November delivery: the headline uses an earlier clean date."""
+    def test_card_says_when_the_latest_close_is_flagged(self, tmp_path, monkeypatch) -> None:
+        """A frame ending inside November delivery: the reading uses an earlier clean date."""
         dates = pd.bdate_range("2019-01-02", "2025-11-12")
         frame = pd.DataFrame(
             {"Soybean": 1000.0, "Soybean Meal": 320.0, "Soybean Oil": 45.0, "Heating Oil": 2.6},
@@ -293,11 +334,10 @@ class TestDataStates:
         at = _cached_app(monkeypatch, tmp_path, frame)
         with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
             at.run()
+            for key in SECTIONS:
+                at.button_group(key=f"view-{key}").set_value("By month").run()
         _no_exceptions(at)
-        headline = next(
-            block.value for block in at.markdown if "Soybean crush margin" in block.value
-        )
-        assert "The latest close, 2025-11-12, falls in a roll or delivery window" in headline
+        assert "last close is a roll day" in _kpis(at)
         st.cache_data.clear()
 
 
@@ -331,9 +371,8 @@ class TestSource:
 
     def test_charts_use_no_streamlit_theme(self) -> None:
         """Without theme=None Streamlit silently replaces the axis colours of the figures."""
-        calls = SOURCE.count("st.plotly_chart(")
-        assert calls == len(CHARTS)
-        assert SOURCE.count("theme=None") == calls
+        assert SOURCE.count("st.plotly_chart(") == 1
+        assert SOURCE.count("theme=None") == 1
 
     def test_no_backtest_left(self) -> None:
         for text in (SOURCE, README):
@@ -342,9 +381,7 @@ class TestSource:
 
     def test_page_clears_the_streamlit_cloud_bar(self) -> None:
         """The bar sits in the parent page, covers 56 px and hid the title in production."""
-        tops = re.findall(
-            r"stMainBlockContainer'\]\{(?:max-width:none;)?padding:([\d.]+)rem", SOURCE
-        )
+        tops = re.findall(r"stMainBlockContainer'\]\{[^}]*?padding:([\d.]+)rem", SOURCE)
         assert len(tops) == 2
         assert all(float(top) * 15 >= 56 for top in tops)
 
@@ -357,25 +394,19 @@ class TestDarkTheme:
         assert theme["backgroundColor"] == tokens["page"]
         assert theme["secondaryBackgroundColor"] == tokens["card"]
         assert tokens["crush"] == visualization.CRUSH
+        assert tokens["oil"] == visualization.OIL
         assert tokens["card"] == visualization.SURFACE
 
     def test_amber_is_reserved_for_the_crush(self, tokens) -> None:
         with (ROOT / ".streamlit" / "config.toml").open("rb") as file:
             theme = tomllib.load(file)["theme"]
         assert theme["primaryColor"] != tokens["crush"]
-        assert "orange-badge" not in SOURCE
         rules = [line for line in SOURCE.splitlines() if "var(--crush)" in line]
-        assert rules and all(line.startswith(".st-key-card-kpi-crush{") for line in rules)
+        assert rules and all(line.startswith(".cm-kpi-crush") for line in rules)
 
     @pytest.mark.parametrize(
         ("text", "surface"),
-        [
-            ("ink", "card"),
-            ("mut", "card"),
-            ("mut", "page"),
-            ("ink", "raised"),
-            ("oncrush", "crush"),
-        ],
+        [("ink", "card"), ("mut", "card"), ("mut", "page"), ("crush", "card")],
     )
     def test_text_contrast_is_at_least_aa(self, tokens, text, surface) -> None:
         assert _contrast(tokens[text], tokens[surface]) >= 4.5
@@ -386,5 +417,6 @@ class TestDarkTheme:
             visualization.OIL,
             visualization.MEAL,
             visualization.FLAT,
+            *visualization.YEAR_GREYS,
         ):
             assert _contrast(color, visualization.SURFACE) >= 3

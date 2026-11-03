@@ -6,7 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.seasonal import REFERENCE_YEAR, latest_reading, monthly_band, to_reference_year
+from src.seasonal import (
+    latest_reading,
+    month_vs_average,
+    monthly_band,
+    monthly_means,
+    range_52w,
+)
 
 
 def _series(start: str, end: str, values: np.ndarray | None = None) -> pd.Series:
@@ -62,15 +68,26 @@ class TestLatestReading:
         values = _series("2026-01-01", "2026-02-01")
         assert latest_reading(values, ~_clean(values)) is None
 
+    def test_unranked_sessions_can_be_read_but_not_ranked_against(self) -> None:
+        values = _series("2018-01-01", "2026-10-27")
+        unranked = _clean(values)
+        unranked.iloc[-30:] = True
+        reading = latest_reading(values, _clean(values), unranked=unranked)
+        assert reading.date == values.index[-1]
+        assert reading.percentile == pytest.approx(100.0)
+        assert reading.sessions < latest_reading(values, _clean(values)).sessions
 
-class TestMonthlyBand:
-    def test_uses_the_five_previous_years_only(self) -> None:
-        values = _series("2015-01-01", "2026-10-27")
+
+class TestMonthlyMeans:
+    def test_one_column_per_year_twelve_months(self) -> None:
+        values = _series("2020-01-01", "2026-10-27")
         values[:] = values.index.year.to_numpy(dtype=float)
-        band = monthly_band(values, _clean(values), 2026)
-        assert (band["low"] == 2021).all()
-        assert (band["high"] == 2025).all()
-        assert list(band.index) == list(range(1, 13))
+        means, counts = monthly_means(values, _clean(values))
+        assert list(means.index) == list(range(1, 13))
+        assert list(means.columns) == list(range(2020, 2027))
+        assert means.loc[6, 2023] == 2023
+        assert counts.loc[6, 2023] > 15
+        assert means.loc[11:, 2026].isna().all()
 
     def test_flagged_sessions_are_left_out(self) -> None:
         values = _series("2020-01-01", "2025-12-31")
@@ -78,14 +95,49 @@ class TestMonthlyBand:
         flagged = _clean(values)
         values.loc["2023-03-01":"2023-03-10"] = 99.0
         flagged.loc["2023-03-01":"2023-03-10"] = True
-        assert monthly_band(values, flagged, 2026).loc[3, "high"] == 1.0
+        means, _ = monthly_means(values, flagged)
+        assert means.loc[3, 2023] == 1.0
+
+    def test_thin_months_are_empty_but_the_month_to_date_needs_less(self) -> None:
+        values = _series("2025-01-01", "2026-10-05")
+        flagged = _clean(values)
+        flagged.loc["2025-03-01":"2025-03-27"] = True
+        means, counts = monthly_means(values, flagged)
+        assert counts.loc[3, 2025] < 5
+        assert pd.isna(means.loc[3, 2025])
+        assert counts.loc[10, 2026] == 3
+        assert pd.notna(means.loc[10, 2026])
+
+    def test_empty(self) -> None:
+        means, counts = monthly_means(pd.Series(dtype=float), pd.Series(dtype=bool))
+        assert means.empty
+        assert list(counts.index) == list(range(1, 13))
 
 
-class TestReferenceYear:
-    def test_maps_dates_and_leap_day(self) -> None:
-        dates = pd.DatetimeIndex(["2024-02-29", "2026-10-27"])
-        mapped = to_reference_year(dates)
-        assert list(mapped) == [
-            pd.Timestamp(REFERENCE_YEAR, 2, 28),
-            pd.Timestamp(REFERENCE_YEAR, 10, 27),
-        ]
+class TestMonthlyBand:
+    def test_uses_the_five_previous_years_only(self) -> None:
+        values = _series("2015-01-01", "2026-10-27")
+        values[:] = values.index.year.to_numpy(dtype=float)
+        means, _ = monthly_means(values, _clean(values))
+        band = monthly_band(means, 2026)
+        assert (band["low"] == 2021).all()
+        assert (band["high"] == 2025).all()
+        assert (band["average"] == 2023).all()
+
+    def test_month_vs_average(self) -> None:
+        values = _series("2015-01-01", "2026-10-27")
+        values[:] = values.index.year.to_numpy(dtype=float)
+        means, _ = monthly_means(values, _clean(values))
+        assert month_vs_average(means, pd.Timestamp("2026-10-27")) == (2026.0, 2023.0)
+        assert month_vs_average(means, pd.Timestamp("2027-01-04")) is None
+        assert month_vs_average(means, pd.Timestamp("2026-12-01")) is None
+
+
+def test_range_52w_uses_clean_sessions_of_the_last_year() -> None:
+    values = _series("2024-01-01", "2026-10-27")
+    flagged = _clean(values)
+    values.iloc[-5] = 10_000.0
+    flagged.iloc[-5] = True
+    low, high = range_52w(values, flagged, values.index[-1])
+    assert high == values.iloc[-1]
+    assert low == values.loc["2025-10-27":].iloc[0]

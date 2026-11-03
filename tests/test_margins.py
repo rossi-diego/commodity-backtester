@@ -13,6 +13,7 @@ from src.margins import (
     add_rins,
     crush_table,
     gap_table,
+    per_gallon,
     rin_per_m3,
     to_metric,
 )
@@ -98,6 +99,27 @@ class TestRins:
         assert within["rin_value"].notna().all()
         assert out.loc["2026-10-05":, "rin_value"].isna().all()
         assert within["after_rin"].iloc[0] == pytest.approx(100.0 - rin_per_m3(2.0))
+
+    def test_sessions_after_the_last_week_hold_its_price_and_say_so(self) -> None:
+        sessions = pd.bdate_range("2026-09-21", "2026-10-30")
+        table = pd.DataFrame({"gap": 100.0, "flagged": False}, index=sessions)
+        d4 = pd.Series([1.0, 2.0], index=pd.DatetimeIndex(["2026-09-14", "2026-09-21"]))
+        out = add_rins(table, d4)
+        assert not out.loc[:"2026-10-04", "rin_held"].any()
+        assert out.loc["2026-10-05":, "rin_held"].all()
+        assert (out["rin_shown"] == rin_per_m3(2.0)).all()
+        assert out["after_rin"].iloc[-1] == pytest.approx(100.0 - rin_per_m3(2.0))
+
+    def test_a_gap_inside_the_history_is_not_filled(self) -> None:
+        sessions = pd.bdate_range("2026-01-05", "2026-03-27")
+        table = pd.DataFrame({"gap": 100.0, "flagged": False}, index=sessions)
+        d4 = pd.Series([1.0, 2.0], index=pd.DatetimeIndex(["2026-01-05", "2026-03-23"]))
+        out = add_rins(table, d4)
+        assert out.loc["2026-02-02":"2026-03-20", "after_rin"].isna().all()
+        assert not out["rin_held"].any()
+
+    def test_per_gallon(self) -> None:
+        assert per_gallon(264.172052) == pytest.approx(1.0)
 
     def test_without_rins_the_columns_are_empty(self) -> None:
         table = pd.DataFrame(

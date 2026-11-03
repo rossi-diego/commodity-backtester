@@ -12,20 +12,24 @@ Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/)
 
 A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third to about half of that product value, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
 
-![Soybean crush margin page: today's margin and its 5-year rank, oil share, soybean oil against diesel, and this year's margin over the range of the past five years](docs/screenshot.png)
+![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart](docs/screenshot.png)
 
 ---
 
 ## What the page answers
 
-| Question | Measure | Unit |
+| Question | Card and chart | Unit |
 |---|---|---|
-| Is crushing paying well or badly now? | Crush margin, with its rank against the past 5 years and this year drawn over the monthly range of the five previous years | USD per tonne of soybeans |
-| How much of the value is oil? | Oil share of the product value, and meal and oil value against the soybean cost | % and USD per tonne |
-| What does the oil in biodiesel cost next to diesel? | The soybean oil needed for 1 m³ of biodiesel against 1 m³ of heating oil, and the gap between them. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
-| How much of that gap does the RIN credit pay? | The D4 RIN value per m³ of biodiesel, and the gap after it | USD per m³ |
+| 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
+| 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
+| 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
 
-Every number on the page states its date and unit. The page opens on the latest data with no button to press.
+The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
+
+- **History**: the series over 5 years, 10 years or all of it, with roll and delivery sessions in grey.
+- **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. The month in progress is a hollow dot, not joined to the line.
+
+The oil cost chart has a switch that adds the D4 RIN to the calculation. The third card always shows both numbers, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
 
 ## How it is calculated
 
@@ -36,7 +40,7 @@ Every number on the page states its date and unit. The page opens on the latest 
 | Feedstock cost | 0.90 t of soybean oil per m³ of biodiesel × oil in USD per tonne | EIA plant data, 2017 to 2020, average 7.50 lb per gallon, which is 0.899 t per m³ ([farmdoc daily](https://farmdocdaily.illinois.edu/wp-content/uploads/2022/02/fdd021622.pdf)) |
 | Oil cost vs diesel | feedstock cost − heating oil, in USD per m³ | NYMEX heating oil stands in for diesel. The industry quotes the same comparison per gallon as the BOHO spread |
 | RIN value | 1.5 D4 RINs per gallon × 264.17 gallons per m³ × weekly D4 price | Equivalence value of biodiesel ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)); weekly volume-weighted D4 prices from EMTS transactions ([EPA](https://www.epa.gov/fuels-registration-reporting-and-compliance-help/rin-trades-and-price-information)) |
-| Gap after the RIN | oil cost vs diesel − RIN value | Each weekly price is used for the sessions of its week and the next, never stretched further |
+| Gap after the RIN | oil cost vs diesel − RIN value | Each weekly price is used for the sessions of its week and the next. Sessions after the last published week hold that price, are drawn dashed, and are left out of ranks and monthly averages |
 
 Unit conversions use the exact definitions (1 lb = 0.45359237 kg, 1 US gallon = 3.785411784 L) and are tested in `tests/test_constants.py`.
 
@@ -56,7 +60,7 @@ From mid-September to mid-December the front months are not the board crush pair
 
 EPA publishes weekly volume-weighted average prices of separated RINs, from EMTS transactions, in a public Qlik Sense app on its [RIN Trades and Price Information](https://www.epa.gov/fuels-registration-reporting-and-compliance-help/rin-trades-and-price-information) page, with no file to download. `src/rins.py` reads the D4 series through the same engine API the page uses, validates it against EPA's own D4 outlier filter (0.05 to 3.00 USD) and the saved series, and caches it. If EPA cannot be reached or the response fails validation, the app uses the dated copy in `data/seed/epa_d4_rin_weekly.csv` and says so on the page.
 
-EPA reloads the data monthly, so the latest RIN price lags the futures by several weeks. The page always prints the RIN week next to the RIN value.
+EPA reloads the data monthly, so the latest RIN price lags the futures by several weeks. The page prints the RIN week and its age next to the RIN value.
 
 ## What it leaves out
 
@@ -84,10 +88,10 @@ data/prices.parquet  (local, git-ignored)
 src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg drops the session
 src/rolls.py     contract calendars: delivery and switch flags
 src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
-src/seasonal.py  latest clean reading, 5-year percentile, monthly range of the five previous years
+src/seasonal.py  latest clean reading, 5-year percentile, monthly averages by year
    |
    v
-src/visualization.py (pure Plotly figures) -> app.py (Streamlit page)
+src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy) -> app.py (Streamlit page)
 ```
 
 Logs use `key=value` fields, for example `event=data_load source=cache rows=6711 as_of=2026-10-30`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
@@ -129,8 +133,10 @@ soybean-crush-margin/
 │   ├── rolls.py                # Contract calendars, delivery and switch flags
 │   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
-│   ├── seasonal.py             # Percentile rank and monthly range on clean sessions
-│   └── visualization.py        # Plotly figure builders, no UI imports
+│   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions
+│   ├── visualization.py        # Plotly figure builders, no UI imports
+│   ├── cards.py                # HTML for the cards, rails and method notes
+│   └── text.py                 # Page copy, held to length limits by tests
 ├── tests/                      # Unit tests per module, and the page end to end with AppTest
 ├── .github/workflows/ci.yml    # CI: lint, type-check, test
 ├── pyproject.toml              # Ruff, mypy, pytest configuration
@@ -145,8 +151,9 @@ soybean-crush-margin/
 | **Flag, do not fix, the rolls** | A back-adjusted series needs every contract's history, which is not free. Flagging delivery and switch sessions keeps every number traceable to a real close and stops expiry artefacts from setting records. |
 | **Metric units** | European and Brazilian desks think in tonnes and m³. The CME per-bushel value is shown beside the headline for anyone who quotes the board crush. |
 | **A missing leg drops the session** | A forward-filled price would invent a margin. |
-| **Amber means the crush margin, nothing else** | Controls, badges and the warning stay neutral, so the colour keeps one meaning. No green or red: a margin level is not a verdict. |
-| **The warning sits beside the number** | What the margin leaves out is read with the margin, not after it. |
+| **Amber means the crush margin, nothing else** | Controls and the other cards stay neutral, so the colour keeps one meaning. No green or red: a margin level is not a verdict. |
+| **One shape, three times** | Each card, chart and explanation has the same structure and size, so a reader learns the page once. Copy length limits are tested, so the text beside a chart cannot outgrow it. |
+| **Monthly averages, not daily overlays** | About 4 in 10 crush sessions are flagged, mostly in the first half of delivery months, so a daily seasonal line would be full of holes. A month-year needs 5 clean sessions. |
 | **Validated, atomic cache** | A download replaces the cache only if each column keeps at least 90% of its cached observations and does not end earlier, so a partial Yahoo response cannot overwrite good data. |
 
 ## History
