@@ -27,6 +27,7 @@ __all__ = [
     "add_rins",
     "crush_table",
     "gap_table",
+    "per_gallon",
     "rin_per_m3",
     "to_metric",
 ]
@@ -93,12 +94,24 @@ def rin_per_m3(usd_per_rin: float | pd.Series) -> float | pd.Series:
     return RINS_PER_GALLON_BIODIESEL * GALLONS_PER_M3 * usd_per_rin
 
 
+def per_gallon(usd_per_m3: float) -> float:
+    """USD per m3 of biodiesel in USD per gallon, the unit the market quotes."""
+    return usd_per_m3 / GALLONS_PER_M3
+
+
 def add_rins(table: pd.DataFrame, d4: pd.Series | None) -> pd.DataFrame:
-    """Add the D4 RIN value per m3 and the gap after it, matched to each session's week."""
+    """Add the D4 RIN value per m3 and the gap after it, matched to each session's week.
+
+    ``rin_value`` is the price of the session's own week, or empty. EPA publishes
+    weeks late, so sessions after the last published week also get ``rin_shown``:
+    the last price held, marked by ``rin_held``. The chart and the cards show the
+    held value as such; ranks and monthly averages leave it out.
+    """
     out = table.copy()
-    if d4 is None or d4.empty or table.empty:
-        out["rin_value"] = float("nan")
-    else:
+    out["rin_value"] = float("nan")
+    out["rin_held"] = False
+    out["rin_shown"] = float("nan")
+    if d4 is not None and not d4.empty and not table.empty:
         weekly = rin_per_m3(d4.sort_index())
         assert isinstance(weekly, pd.Series)
         sessions = pd.DatetimeIndex(table.index).as_unit("ns")
@@ -106,5 +119,7 @@ def add_rins(table: pd.DataFrame, d4: pd.Series | None) -> pd.DataFrame:
         out["rin_value"] = weekly.reindex(
             sessions, method="ffill", tolerance=RIN_TOLERANCE
         ).to_numpy()
-    out["after_rin"] = out["gap"] - out["rin_value"]
+        out["rin_held"] = sessions > weekly.index[-1] + RIN_TOLERANCE
+        out["rin_shown"] = out["rin_value"].where(~out["rin_held"], float(weekly.iloc[-1]))
+    out["after_rin"] = out["gap"] - out["rin_shown"]
     return out

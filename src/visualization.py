@@ -1,22 +1,21 @@
-"""Plotly figure builders for the crush margin page. Pure, no UI imports."""
+"""Plotly figure builders for the crush margin page. Pure, no UI imports.
+
+Every section draws the same two figures, so the three charts read alike:
+``history_figure`` (a metric over time) and ``by_month_figure`` (monthly
+averages, one line per year).
+"""
 
 from __future__ import annotations
 
 from typing import Any, Final
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from .seasonal import REFERENCE_YEAR, to_reference_year
+from .seasonal import monthly_band
 
-__all__ = [
-    "feedstock_figure",
-    "gap_figure",
-    "history_figure",
-    "oil_share_figure",
-    "seasonal_figure",
-    "value_figure",
-]
+__all__ = ["by_month_figure", "history_figure"]
 
 # ---------------------------------------------------------------------------
 # Design tokens
@@ -33,9 +32,13 @@ OIL: Final[str] = "#4d8fe8"
 MEAL: Final[str] = "#c76fae"
 FLAT: Final[str] = "#7d8796"
 BAND_FILL: Final[str] = "rgba(125, 135, 150, 0.22)"
+# Past years in the by-month view, most recent first: lighter means more recent.
+YEAR_GREYS: Final[tuple[str, ...]] = ("#c3cad3", "#a7b0bc", "#8f99a6", "#7a8491", "#69737f")
 
-MAIN_HEIGHT: Final[int] = 380
-SMALL_HEIGHT: Final[int] = 200
+HEIGHT: Final[int] = 400
+MONTHS: Final[list[str]] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+]  # fmt: skip
 
 
 # ---------------------------------------------------------------------------
@@ -43,113 +46,110 @@ SMALL_HEIGHT: Final[int] = 200
 # ---------------------------------------------------------------------------
 
 
-def seasonal_figure(
-    values: pd.Series, flagged: pd.Series, band: pd.DataFrame, year: int
-) -> go.Figure:
-    """This year's crush over the monthly range of the five previous years."""
-    fig = go.Figure()
-    edges = [pd.Timestamp(REFERENCE_YEAR, month, 1) for month in range(1, 13)]
-    edges.append(pd.Timestamp(REFERENCE_YEAR, 12, 31))
-    low = [*band["low"], band["low"].iloc[-1]]
-    high = [*band["high"], band["high"].iloc[-1]]
-    median = [*band["median"], band["median"].iloc[-1]]
-    previous = f"{year - 5} to {year - 1}"
-    fig.add_trace(_step(edges, low, "Range low", FLAT, 0, hover=False, legend=False))
-    fig.add_trace(_step(edges, high, f"Range {previous}", FLAT, 0, hover=False, fill="tonexty"))
-    fig.add_trace(_step(edges, median, f"Median {previous}", FLAT, 1.25, dash="dot"))
-
-    this_year = values[pd.DatetimeIndex(values.index).year == year]
-    flags = flagged.reindex(this_year.index, fill_value=True)
-    x = to_reference_year(pd.DatetimeIndex(this_year.index))
-    fig.add_trace(_line(x, this_year, "Roll or delivery", FLAT, 1, hover=False))
-    fig.add_trace(_line(x, this_year.where(~flags), str(year), CRUSH, 2.25))
-    clean = this_year[~flags]
-    if not clean.empty:
-        fig.add_trace(_dot(to_reference_year(pd.DatetimeIndex(clean.index[-1:])), clean.iloc[-1:]))
-
-    fig.update_layout(**_layout(MAIN_HEIGHT))
-    fig.update_xaxes(
-        range=[pd.Timestamp(REFERENCE_YEAR, 1, 1), pd.Timestamp(REFERENCE_YEAR, 12, 31)],
-        tickformat="%b",
-        dtick="M1",
-        hoverformat="%d %b",
-    )
-    fig.update_yaxes(title="USD per tonne of soybeans", zeroline=True, zerolinecolor=AXIS)
-    return fig
-
-
 def history_figure(
     values: pd.Series,
     flagged: pd.Series,
-    title: str,
-    color: str = CRUSH,
-    name: str = "Clean sessions",
-    height: int = MAIN_HEIGHT,
+    *,
+    name: str,
+    color: str,
+    y_title: str,
+    percent: bool = False,
+    reference: tuple[str, pd.Series] | None = None,
+    held: tuple[str, pd.Series] | None = None,
+    zero_labels: tuple[str, str] | None = None,
+    hover: dict[str, pd.Series] | None = None,
 ) -> go.Figure:
-    """A series over time, with roll and delivery sessions drawn as a thin grey line."""
-    flags = flagged.reindex(values.index, fill_value=True)
+    """A metric over time, with roll and delivery sessions drawn as a thin grey line.
+
+    ``reference`` adds a thin grey comparison line. ``held`` marks the sessions whose
+    value rests on a carried-forward input; they are drawn dashed and named.
+    ``hover`` adds component levels to the tooltip of the main line.
+    """
+    flags = flagged.reindex(values.index, fill_value=True).astype(bool)
+    held_mask = (
+        held[1].reindex(values.index, fill_value=False).astype(bool)
+        if held is not None
+        else pd.Series(False, index=values.index)
+    )
     fig = go.Figure()
+    if reference is not None:
+        ref_name, ref_values = reference
+        fig.add_trace(_line(values.index, ref_values.where(~flags), ref_name, FLAT, 1, False))
     fig.add_trace(_line(values.index, values, "Roll or delivery", FLAT, 1, hover=False))
-    fig.add_trace(_line(values.index, values.where(~flags), name, color, 1.75))
+    main = _line(values.index, values.where(~flags & ~held_mask), name, color, 1.75)
+    _add_hover(main, values.index, hover, percent)
+    fig.add_trace(main)
+    if held is not None and held_mask.any():
+        # Join the dashed tail to the last real point so the line does not break.
+        start = int(np.flatnonzero(held_mask.to_numpy())[0])
+        tail = values.iloc[max(start - 1, 0) :].where(~flags)
+        fig.add_trace(_line(tail.index, tail, held[0], color, 1.75, dash="dash"))
     clean = values[~flags]
     if not clean.empty:
         fig.add_trace(_dot(clean.index[-1:], clean.iloc[-1:], color))
-    fig.update_layout(**_layout(height))
+    fig.update_layout(**_layout())
     fig.update_xaxes(range=[values.index[0], values.index[-1]])
-    fig.update_yaxes(title=title, zeroline=True, zerolinecolor=AXIS)
+    _y_axis(fig, y_title, percent)
+    if zero_labels is not None:
+        _zero_labels(fig, values, zero_labels)
     return fig
 
 
-def gap_figure(table: pd.DataFrame, height: int = 260) -> go.Figure:
-    """Oil cost minus heating oil, before and after the D4 RIN credit, on clean sessions."""
-    flags = table["flagged"].reindex(table.index, fill_value=True).astype(bool)
+def by_month_figure(
+    means: pd.DataFrame,
+    counts: pd.DataFrame,
+    *,
+    years: list[int],
+    current: int,
+    color: str,
+    y_title: str,
+    band: bool = True,
+    percent: bool = False,
+    month_to_date: int | None = None,
+) -> go.Figure:
+    """Monthly averages of clean sessions, one line per year, on a January-to-December axis.
+
+    ``current`` is drawn bold in the metric colour; ``years`` are earlier years in
+    greys. ``month_to_date`` is the month in progress, drawn as a hollow marker
+    and not joined to the line. ``band`` shades the range of the five years before
+    ``current``, with their average dotted.
+    """
+    fmt = _value_format(percent)
     fig = go.Figure()
-    fig.add_trace(_line(table.index, table["gap"], "Roll or delivery", FLAT, 1, hover=False))
-    fig.add_trace(_line(table.index, table["gap"].where(~flags), "Before the RIN", INK_SERIES, 1.5))
-    if table["after_rin"].notna().any():
-        after = table["after_rin"].where(~flags)
-        fig.add_trace(_line(table.index, after, "After the D4 RIN", OIL, 1.75))
-    fig.update_layout(**_layout(height))
-    fig.update_xaxes(range=[table.index[0], table.index[-1]])
-    fig.update_yaxes(title="Oil minus heating oil, USD per m³", zeroline=True, zerolinecolor=AXIS)
-    return fig
-
-
-def value_figure(table: pd.DataFrame) -> go.Figure:
-    """Meal value, oil value and soybean cost, per tonne of soybeans crushed."""
-    fig = go.Figure()
-    fig.add_trace(_line(table.index, table["beans"], "Soybean cost", INK_SERIES, 1.5))
-    fig.add_trace(_line(table.index, table["meal_value"], "Meal value", MEAL, 1.5))
-    fig.add_trace(_line(table.index, table["oil_value"], "Oil value", OIL, 1.5))
-    fig.update_layout(**_layout(MAIN_HEIGHT))
-    fig.update_xaxes(range=[table.index[0], table.index[-1]])
-    fig.update_yaxes(title="USD per tonne of soybeans")
-    return fig
-
-
-def oil_share_figure(table: pd.DataFrame) -> go.Figure:
-    """Oil's share of the product value, with roll and delivery sessions in grey."""
-    fig = history_figure(
-        table["oil_share"] * 100,
-        table["flagged"],
-        "Oil share, %",
-        color=OIL,
-        name="Oil share",
-        height=SMALL_HEIGHT,
-    )
-    fig.update_layout(showlegend=False)
-    fig.update_yaxes(zeroline=False, ticksuffix="%", tickformat=".0f")
-    return fig
-
-
-def feedstock_figure(table: pd.DataFrame) -> go.Figure:
-    """Soybean oil cost per m3 of biodiesel against heating oil per m3."""
-    fig = go.Figure()
-    fig.add_trace(_line(table.index, table["diesel"], "Heating oil", FLAT, 1.5))
-    fig.add_trace(_line(table.index, table["feedstock"], "Soybean oil feedstock", OIL, 1.75))
-    fig.update_layout(**_layout(MAIN_HEIGHT))
-    fig.update_xaxes(range=[table.index[0], table.index[-1]])
-    fig.update_yaxes(title="USD per m³")
+    if band:
+        stats = monthly_band(means, current)
+        previous = f"{current - 5}–{current - 1}"
+        fig.add_trace(_band_edge(stats["low"], "Range low", legend=False))
+        fig.add_trace(_band_edge(stats["high"], f"Range of {previous} averages", fill=True))
+        fig.add_trace(_month_line(stats["average"], f"Average {previous}", FLAT, 1.25, fmt, "dot"))
+    # Oldest first, so the reversed legend reads from the current year back.
+    past = sorted(year for year in years if year != current and year in means)
+    for rank, year in enumerate(past):
+        grey = YEAR_GREYS[min(len(past) - 1 - rank, len(YEAR_GREYS) - 1)]
+        fig.add_trace(_month_line(means[year], str(year), grey, 1.25, fmt, counts=counts[year]))
+    if current in means:
+        line = means[current]
+        if month_to_date is not None:
+            line = line.where(line.index != month_to_date)
+        fig.add_trace(_month_line(line, str(current), color, 2.5, fmt, counts=counts[current]))
+        to_date = None if month_to_date is None else means[current].iloc[month_to_date - 1]
+        if month_to_date is not None and pd.notna(to_date):
+            fig.add_trace(
+                go.Scatter(
+                    x=[MONTHS[month_to_date - 1]],
+                    y=[float(to_date)],
+                    mode="markers",
+                    name=f"{MONTHS[month_to_date - 1]} to date",
+                    customdata=[int(counts[current].iloc[month_to_date - 1])],
+                    hovertemplate=fmt + " (%{customdata} sessions so far)",
+                    marker={"size": 10, "color": SURFACE, "line": {"color": color, "width": 2}},
+                    cliponaxis=False,
+                )
+            )
+    fig.update_layout(**_layout())
+    fig.update_layout(legend={"traceorder": "reversed"})
+    fig.update_xaxes(categoryorder="array", categoryarray=MONTHS, range=[-0.3, 11.3])
+    _y_axis(fig, y_title, percent)
     return fig
 
 
@@ -158,12 +158,12 @@ def feedstock_figure(table: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 
-def _layout(height: int) -> dict[str, Any]:
+def _layout() -> dict[str, Any]:
     return {
         "template": "plotly_dark",
         "paper_bgcolor": SURFACE,
         "plot_bgcolor": SURFACE,
-        "height": height,
+        "height": HEIGHT,
         "margin": {"l": 8, "r": 8, "t": 8, "b": 8},
         "font": {"family": "IBM Plex Sans, sans-serif", "size": 12, "color": MUTED},
         "hovermode": "x unified",
@@ -180,44 +180,107 @@ def _layout(height: int) -> dict[str, Any]:
     }
 
 
-def _line(x: Any, y: Any, name: str, color: str, width: float, hover: bool = True) -> go.Scatter:
-    return go.Scatter(
-        x=x,
-        y=y,
-        mode="lines",
-        name=name,
-        hovertemplate="%{y:,.1f}" if hover else None,
-        hoverinfo=None if hover else "skip",
-        line={"color": color, "width": width},
-    )
+def _y_axis(fig: go.Figure, title: str, percent: bool) -> None:
+    if percent:
+        fig.update_yaxes(title=title, ticksuffix="%", tickformat=".0f")
+    else:
+        fig.update_yaxes(title=title, zeroline=True, zerolinecolor=AXIS)
 
 
-def _step(
-    x: list[pd.Timestamp],
-    y: list[float],
+def _value_format(percent: bool) -> str:
+    return "%{y:.1f}%" if percent else "%{y:,.1f}"
+
+
+def _line(
+    x: Any,
+    y: Any,
     name: str,
     color: str,
     width: float,
-    dash: str | None = None,
     hover: bool = True,
-    legend: bool = True,
-    fill: str | None = None,
+    dash: str | None = None,
 ) -> go.Scatter:
     return go.Scatter(
         x=x,
         y=y,
         mode="lines",
         name=name,
-        showlegend=legend,
-        fill=fill,
-        fillcolor=BAND_FILL if fill else None,
         hovertemplate="%{y:,.1f}" if hover else None,
         hoverinfo=None if hover else "skip",
-        line={"color": color, "width": width, "shape": "hv", "dash": dash},
+        line={"color": color, "width": width, "dash": dash},
     )
 
 
-def _dot(x: Any, y: pd.Series, color: str = CRUSH) -> go.Scatter:
+def _add_hover(
+    trace: go.Scatter, index: pd.Index, hover: dict[str, pd.Series] | None, percent: bool
+) -> None:
+    template = _value_format(percent)
+    if hover:
+        names = list(hover)
+        data = pd.concat([hover[name].reindex(index) for name in names], axis=1)
+        trace.update(customdata=data.to_numpy())
+        template += "".join(
+            f"<br>{name}: %{{customdata[{i}]:,.0f}}" for i, name in enumerate(names)
+        )
+    trace.update(hovertemplate=template)
+
+
+def _month_line(
+    values: pd.Series,
+    name: str,
+    color: str,
+    width: float,
+    fmt: str,
+    dash: str | None = None,
+    counts: pd.Series | None = None,
+) -> go.Scatter:
+    trace = go.Scatter(
+        x=MONTHS,
+        y=values.to_numpy(),
+        mode="lines+markers" if dash is None else "lines",
+        name=name,
+        connectgaps=False,
+        hovertemplate=fmt,
+        line={"color": color, "width": width, "dash": dash},
+        marker={"size": 5, "color": color},
+    )
+    if counts is not None:
+        trace.update(customdata=counts.to_numpy(), hovertemplate=fmt + " (%{customdata} sessions)")
+    return trace
+
+
+def _band_edge(values: pd.Series, name: str, legend: bool = True, fill: bool = False) -> go.Scatter:
+    return go.Scatter(
+        x=MONTHS,
+        y=values.to_numpy(),
+        mode="lines",
+        name=name,
+        showlegend=legend,
+        fill="tonexty" if fill else None,
+        fillcolor=BAND_FILL if fill else None,
+        hoverinfo="skip",
+        line={"color": FLAT, "width": 0},
+    )
+
+
+def _zero_labels(fig: go.Figure, values: pd.Series, labels: tuple[str, str]) -> None:
+    """Name both sides of zero, when zero is inside the drawn range."""
+    if values.dropna().empty or not values.min() < 0 < values.max():
+        return
+    for text, shift in ((labels[0], 10), (labels[1], -10)):
+        fig.add_annotation(
+            x=0.005,
+            xref="paper",
+            y=0,
+            yshift=shift,
+            text=text,
+            showarrow=False,
+            xanchor="left",
+            font={"size": 11, "color": MUTED},
+        )
+
+
+def _dot(x: Any, y: pd.Series, color: str) -> go.Scatter:
     return go.Scatter(
         x=x,
         y=[float(value) for value in y],
