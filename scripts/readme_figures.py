@@ -53,7 +53,8 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
         figures["d4_usd_per_m3"] = _rounded(cast(float, rin_per_m3(price)))
     figures["btc_usd_per_m3"] = _rounded(BTC_USD_PER_GALLON * GALLONS_PER_M3)
 
-    before = yearly_means(gap["gap"], gap["flagged"])
+    # Both columns leave out the sessions on a held RIN price, so they cover the same days.
+    before = yearly_means(gap["gap"], gap["flagged"], gap["rin_held"])
     after = yearly_means(
         gap["after_rin"].where(gap["rin_value"].notna()), gap["flagged"], gap["rin_held"]
     )

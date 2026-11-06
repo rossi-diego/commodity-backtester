@@ -13,6 +13,7 @@ import pytest
 from scripts import readme_figures
 from src import config
 from src.data_loader import LoadResult
+from src.margins import add_rins, gap_table
 from src.rins import RinResult, _read
 
 
@@ -98,3 +99,17 @@ def test_main_logs_a_load_failure(caplog) -> None:
     ):
         readme_figures.main()
     assert any("event=readme_figures_failed" in r.getMessage() for r in caplog.records)
+
+
+def test_both_gap_columns_leave_out_held_rin_sessions(synthetic_prices, seed) -> None:
+    """With the RIN held for the last months, the before column covers the after's days."""
+    last = synthetic_prices.index.max()
+    d4 = seed.loc[: last - pd.DateOffset(months=4)]
+    figures = readme_figures.compute(synthetic_prices, d4)
+    gap = add_rins(gap_table(synthetic_prices), d4)
+    held = gap["rin_held"].astype(bool)
+    assert held.loc[str(last.year)].any()
+    year = gap.loc[str(last.year)]
+    kept = year[~year["flagged"].astype(bool) & ~held.loc[str(last.year)]]
+    assert figures[f"gap_before_{last.year}"] == round(kept["gap"].mean())
+    assert figures[f"gap_after_{last.year}"] == round(kept["after_rin"].mean())

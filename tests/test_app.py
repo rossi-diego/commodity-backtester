@@ -242,11 +242,11 @@ class TestControls:
         names = [trace.get("name") for trace in json.loads(spec)["data"]]
         for name in (str(year), str(year - 1), str(year - 2)):
             assert name in names
-        assert any(name and name.startswith("Range ") for name in names)
+        assert "Range" in names
         assert "against" in _head(app, key) or "too few" in _head(app, key)
         app.checkbox(key=f"band-{key}").uncheck().run()
         names = [trace.get("name") for trace in json.loads(_chart(app, key))["data"]]
-        assert not any(name and name.startswith(("Range ", "Avg ")) for name in names)
+        assert not {"Range", "Avg"} & set(names)
 
     def test_years_are_capped(self, app) -> None:
         app.run()

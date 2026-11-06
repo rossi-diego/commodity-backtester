@@ -6,6 +6,7 @@ import re
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 from src.margins import add_rins, crush_table, gap_table
@@ -23,6 +24,9 @@ from src.visualization import (
     ROLL,
     SURFACE,
     YEAR_COLORS,
+    ZERO_LABEL_CHAR_PX,
+    ZERO_LABEL_PAD_PX,
+    ZERO_LABEL_PLOT_PX,
     by_month_figure,
     history_figure,
 )
@@ -151,23 +155,39 @@ class TestHistory:
         """On a V, 'above' goes over the trough and 'below' under an arm, off the line."""
         dates = pd.bdate_range("2024-01-01", periods=200)
         values = pd.Series(np.abs(np.linspace(-100.0, 100.0, 200)) - 40.0, index=dates)
-        flagged = pd.Series(False, index=dates)
-        fig = history_figure(
-            values, flagged, name="V", color=OIL, y_title="", zero_labels=("above", "below")
-        )
-        bins = np.array_split(np.arange(len(values)), 10)
-        starts = [dates[b[0]] for b in bins]
-        placed = {}
+        fig = _zero_labelled(values)
+        windows = _label_windows(fig, values)
+        assert set(windows) == {"above", "below"}
         for note in fig.layout.annotations:
             assert note.xref == "x"
             assert note.bgcolor == "rgba(20,27,35,0.85)"
-            placed[note.text] = starts.index(pd.Timestamp(note.x))
-        assert placed["above"] != placed["below"]
-        for position in placed.values():
-            chunk = values.iloc[bins[position]]
-            assert not chunk.min() < 0 < chunk.max()
-        assert values.iloc[bins[placed["above"]]].max() < 0
-        assert values.iloc[bins[placed["below"]]].min() > 0
+        assert values.iloc[windows["above"]].max() < 0
+        assert values.iloc[windows["below"]].min() > 0
+
+    def test_zero_labels_find_room_when_every_tenth_crosses_zero(self) -> None:
+        """Each of 10 bins crosses zero, so the labels move to finer bins, still clear."""
+        dates = pd.bdate_range("2020-01-01", periods=800)
+        values = pd.Series(100.0 * np.sin(np.arange(800) * 2 * np.pi / 140), index=dates)
+        for chunk in np.array_split(np.arange(800), 10):
+            assert values.iloc[chunk].min() < 0 < values.iloc[chunk].max()
+        fig = _zero_labelled(values)
+        windows = _label_windows(fig, values)
+        assert set(windows) == {"above", "below"}
+        assert values.iloc[windows["above"]].max() < 0
+        assert values.iloc[windows["below"]].min() > 0
+
+    def test_zero_labels_are_dropped_when_no_place_is_clear(self) -> None:
+        dates = pd.bdate_range("2020-01-01", periods=400)
+        values = pd.Series(np.where(np.arange(400) % 2, 50.0, -50.0), index=dates)
+        assert not _zero_labelled(values).layout.annotations
+
+    def test_zero_labels_also_clear_the_reference_line(self) -> None:
+        """A reference just over zero fills the 'above' box everywhere, so only 'below' stays."""
+        dates = pd.bdate_range("2024-01-01", periods=200)
+        values = pd.Series(np.abs(np.linspace(-100.0, 100.0, 200)) - 40.0, index=dates)
+        reference = pd.Series(1.0, index=dates)
+        fig = _zero_labelled(values, reference)
+        assert [note.text for note in fig.layout.annotations] == ["below"]
 
 
 class TestByMonth:
@@ -204,7 +224,8 @@ class TestByMonth:
         month, year = crush.index[-1].month, crush.index[-1].year
         line = np.asarray(_trace(fig, str(year)).y, dtype=float)
         assert np.isnan(line[month - 1])
-        marker = _trace(fig, f"{MONTHS[month - 1]} to date")
+        marker = _trace(fig, "To date")
+        assert f"<extra>{MONTHS[month - 1]} to date</extra>" in marker.hovertemplate
         assert marker.y[0] == pytest.approx(means.loc[month, year])
         assert marker.marker.color == SURFACE
 
@@ -212,8 +233,8 @@ class TestByMonth:
         crush, _ = tables
         year = crush.index[-1].year
         with_band, _ = _by_month(crush)
-        assert f"Range {year - 5}–{year - 1}" in _names(with_band)
-        assert f"Avg {year - 5}–{year - 1}" in _names(with_band)
+        assert {"Range", "Avg"} <= set(_names(with_band))
+        assert f"Avg {year - 5}–{year - 1}" in _trace(with_band, "Avg").hovertemplate
         without, _ = _by_month(crush, band=False)
         assert not any(name and name.startswith("Range") for name in _names(without))
 
@@ -225,12 +246,17 @@ class TestByMonth:
         assert len(set(dashes)) == 5
         assert "dot" not in dashes
         assert _trace(fig, str(year - 1)).mode == "lines+markers"
-        assert _trace(fig, f"Avg {year - 5}–{year - 1}").line.dash == "dot"
+        assert _trace(fig, "Avg").line.dash == "dot"
 
     def test_legend_sits_below_and_months_are_level(self, tables) -> None:
         fig, _ = _by_month(tables[0])
         assert fig.layout.legend.y < 0
         assert fig.layout.legend.yanchor == "top"
+        # Three entries to a row on a phone: a fixed entry width that every name fits.
+        assert fig.layout.legend.entrywidth == 36
+        assert fig.layout.legend.entrywidthmode == "pixels"
+        shown = [t.name for t in fig.data if t.showlegend is not False]
+        assert max(len(name) for name in shown) <= len("To date")
         assert fig.layout.xaxis.tickangle == 0
         history = _figures(tables)[0]
         assert history.layout.legend.y > 1
@@ -249,3 +275,28 @@ class TestColour:
         for fig in _figures(tables):
             axes = [key for key in fig.to_plotly_json()["layout"] if key.startswith("yaxis")]
             assert axes == ["yaxis"]
+
+
+def _zero_labelled(values: pd.Series, reference: pd.Series | None = None) -> go.Figure:
+    return history_figure(
+        values,
+        pd.Series(False, index=values.index),
+        name="Z",
+        color=OIL,
+        y_title="",
+        reference=None if reference is None else ("Ref", reference),
+        zero_labels=("above", "below"),
+    )
+
+
+def _label_windows(fig: go.Figure, values: pd.Series) -> dict[str, slice]:
+    """The sessions each zero label covers, from its left edge and its budgeted width."""
+    windows = {}
+    for note in fig.layout.annotations:
+        assert note.xanchor == "left"
+        first = values.index.get_loc(pd.Timestamp(note.x))
+        width_px = len(note.text) * ZERO_LABEL_CHAR_PX + ZERO_LABEL_PAD_PX
+        width = int(np.ceil(len(values) * width_px / ZERO_LABEL_PLOT_PX[0]))
+        assert first + width <= len(values)
+        windows[note.text] = slice(first, first + width)
+    return windows

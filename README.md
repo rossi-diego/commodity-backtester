@@ -56,9 +56,9 @@ The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per 
 | 2023 | +385 | −232 |
 | 2024 | +236 | −72 |
 | 2025 | +361 | −2 |
-| 2026 (to date) | +334 | −288 |
+| 2026 (to date) | +368 | −288 |
 
-Every figure in this README comes from `python -m scripts.readme_figures` (data to 2026-11-05).
+The D4, yearly, roll and risk figures in this README come from `python -m scripts.readme_figures` (data to 2026-11-05); the 2026-10-27 snapshot above is asserted by `tests/test_margins.py`.
 
 The D4 does not simply close the gap, because the gap is not the producer's whole bill. A negative value after the RIN is what is left to pay for conversion (methanol, energy, the plant) and for margin. Through 2024 the $1/gal blenders' tax credit (BTC, 264 USD/m³) paid part of the gap ([AFDC](https://afdc.energy.gov/laws/395)), and from 2025 the 45Z clean fuel production credit replaced it, with a value that depends on carbon intensity ([IRS](https://www.irs.gov/credits-deductions/clean-fuel-production-credit)). LCFS credits pay in some states ([AFDC](https://afdc.energy.gov/laws/6308)), and renewable diesel, at 1.7 RINs per gallon ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)), is the marginal gallon.
 
@@ -180,7 +180,7 @@ soybean-crush-margin/
 │   ├── cards.py                # HTML for the cards, rails and method notes
 │   ├── styles.py               # The page CSS
 │   └── text.py                 # Page copy, held to length limits by tests
-├── scripts/readme_figures.py   # Every figure quoted in this README
+├── scripts/readme_figures.py   # The D4, yearly, roll and risk figures in this README
 ├── tests/                      # Unit tests per module, and the page end to end with AppTest
 ├── .github/workflows/ci.yml    # CI: lint, type-check, test, audit
 ├── pyproject.toml              # Ruff, mypy, pytest configuration

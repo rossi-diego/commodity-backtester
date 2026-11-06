@@ -36,12 +36,19 @@ ROLL: Final[str] = "rgba(125,135,150,0.35)"
 BAND_FILL: Final[str] = "rgba(125, 135, 150, 0.22)"
 # The fill behind the zero labels: SURFACE, nearly opaque, so the grid does not cross the text.
 LABEL_FILL: Final[str] = "rgba(20,27,35,0.85)"
-ZERO_LABEL_BINS: Final[int] = 10
 # Past years in the by-month view, by how many years back: teal is last year. Hues kept
 # clear of amber, blue and the near-white ink, which the current year draws in. Each year
 # keeps its colour whichever others are picked; six to ten years back repeat the five
 # colours, dashed.
 YEAR_COLORS: Final[tuple[str, ...]] = ("#2bb39b", "#a98bf0", "#86b83a", "#e5664c", "#d86fb0")
+# Zero labels: the bin counts tried in turn, and the label box in pixels. The plot size
+# is not known when the figure is built, so the box is sized against a conservative
+# plot: narrower than any desktop chart, so the label is never wider than budgeted there.
+ZERO_LABEL_BINS: Final[tuple[int, ...]] = (10, 20, 40)
+ZERO_LABEL_PLOT_PX: Final[tuple[int, int]] = (640, 300)
+ZERO_LABEL_CHAR_PX: Final[float] = 5.5
+ZERO_LABEL_PAD_PX: Final[int] = 8
+ZERO_LABEL_HEIGHT_PX: Final[int] = 20
 
 HEIGHT: Final[int] = 400
 MONTHS: Final[list[str]] = [
@@ -107,7 +114,8 @@ def history_figure(
     if y_dtick is not None:
         fig.update_yaxes(dtick=y_dtick)
     if zero_labels is not None:
-        _zero_labels(fig, values, zero_labels)
+        others = [] if reference is None else [reference[1].where(~flags)]
+        _zero_labels(fig, values, zero_labels, others)
     return fig
 
 
@@ -137,10 +145,12 @@ def by_month_figure(
         stats = monthly_band(means, current)
         previous = f"{current - 5}–{current - 1}"
         fig.add_trace(_band_edge(stats["low"], "Range low", legend=False))
-        fig.add_trace(_band_edge(stats["high"], f"Range {previous}", fill=True))
-        fig.add_trace(
-            _month_line(stats["average"], f"Avg {previous}", FLAT, 1.25, fmt, "dot", markers=False)
-        )
+        # Short legend names keep three entries to a row on a phone; the hover and the
+        # reading above the chart name the years.
+        fig.add_trace(_band_edge(stats["high"], "Range", fill=True))
+        average = _month_line(stats["average"], "Avg", FLAT, 1.25, fmt, "dot", markers=False)
+        average.update(hovertemplate=f"{fmt}<extra>Avg {previous}</extra>")
+        fig.add_trace(average)
     # Oldest first, so the reversed legend reads from the current year back.
     past = sorted(year for year in years if year != current and year in means)
     for year in past:
@@ -168,9 +178,10 @@ def by_month_figure(
                     x=[MONTHS[month_to_date - 1]],
                     y=[float(to_date)],
                     mode="markers",
-                    name=f"{MONTHS[month_to_date - 1]} to date",
+                    name="To date",
                     customdata=[int(counts[current].iloc[month_to_date - 1])],
-                    hovertemplate=fmt + " (%{customdata} sessions so far)",
+                    hovertemplate=fmt + " (%{customdata} sessions so far)"
+                    f"<extra>{MONTHS[month_to_date - 1]} to date</extra>",
                     marker={"size": 10, "color": SURFACE, "line": {"color": color, "width": 2}},
                     cliponaxis=False,
                 )
@@ -184,9 +195,12 @@ def by_month_figure(
             "yanchor": "top",
             "x": 0,
             "xanchor": "left",
-            # A wrapped legend gives every entry the widest one's width: at 10.5 px two
-            # entries fit side by side on a phone.
+            # A wrapped legend gives every entry the widest one's width. Names of at most
+            # 7 characters in a fixed 36 px of text (the symbol comes on top) fit three
+            # to a row on a phone.
             "font": {"size": 10.5},
+            "entrywidth": 36,
+            "entrywidthmode": "pixels",
         },
         margin={"b": 56},
     )
@@ -306,26 +320,33 @@ def _band_edge(values: pd.Series, name: str, legend: bool = True, fill: bool = F
     )
 
 
-def _zero_labels(fig: go.Figure, values: pd.Series, labels: tuple[str, str]) -> None:
+def _zero_labels(
+    fig: go.Figure, values: pd.Series, labels: tuple[str, str], others: list[pd.Series]
+) -> None:
     """Name both sides of zero, when zero is inside the drawn range.
 
-    The drawn values are cut into equal-count bins. "Above zero" goes where the line
-    stays lowest (the bin with the lowest high), "below zero" where it stays highest
-    (the bin with the highest low), so neither label sits on the line.
+    "Above zero" sits just over the zero line, "below zero" just under it, each where no
+    drawn line (``values`` and ``others``) passes through the label's box. A label with
+    no clear place is left out rather than drawn over a line.
     """
     drawn = values.dropna()
     if drawn.empty or not drawn.min() < 0 < drawn.max():
         return
-    bins = [b for b in np.array_split(np.arange(len(drawn)), ZERO_LABEL_BINS) if len(b)]
-    chunks = [drawn.iloc[b] for b in bins]
-    lowest_high = min(chunks, key=lambda chunk: float(chunk.max()))
-    highest_low = max(chunks, key=lambda chunk: float(chunk.min()))
-    for text, shift, chunk in ((labels[0], 10, lowest_high), (labels[1], -10, highest_low)):
+    lines = [drawn.to_numpy(dtype=float)]
+    lines += [other.reindex(drawn.index).to_numpy(dtype=float) for other in others]
+    span = float(np.nanmax([np.nanmax(line) for line in lines])) - float(
+        np.nanmin([np.nanmin(line) for line in lines])
+    )
+    height = ZERO_LABEL_HEIGHT_PX * span / ZERO_LABEL_PLOT_PX[1]
+    for text, side in ((labels[0], 1), (labels[1], -1)):
+        start = _zero_label_start(lines, text, side, height)
+        if start is None:
+            continue
         fig.add_annotation(
-            x=chunk.index[0],
+            x=drawn.index[start],
             xref="x",
             y=0,
-            yshift=shift,
+            yshift=10 * side,
             text=text,
             showarrow=False,
             xanchor="left",
@@ -333,6 +354,45 @@ def _zero_labels(fig: go.Figure, values: pd.Series, labels: tuple[str, str]) -> 
             borderpad=2,
             font={"size": 11, "color": MUTED},
         )
+
+
+def _zero_label_start(lines: list[np.ndarray], text: str, side: int, height: float) -> int | None:
+    """The first session of a clear place for a zero label, or None when there is none.
+
+    The label box spans ``(0, height)`` above zero (``side`` 1) or ``(-height, 0)``
+    below, and the label's width in sessions from its left edge. Bin starts are tried
+    at 10, then 20, then 40 bins. A place where the main line stays on the other side of
+    zero is preferred; failing that, any place where every line clears the box. Among
+    the places at the first bin count that has any, the one with the widest clearance wins.
+    """
+    count = len(lines[0])
+    width_px = len(text) * ZERO_LABEL_CHAR_PX + ZERO_LABEL_PAD_PX
+    width = max(int(np.ceil(count * width_px / ZERO_LABEL_PLOT_PX[0])), 2)
+    low, high = (0.0, height) if side > 0 else (-height, 0.0)
+    # Each drawn segment between two sessions, as its lowest and highest value.
+    segments = []
+    for line in lines:
+        lo, hi = np.fmin(line[:-1], line[1:]), np.fmax(line[:-1], line[1:])
+        # Distance from the box; zero or less means the segment crosses it.
+        distance = np.maximum(low - hi, lo - high)
+        segments.append(np.where(np.isnan(distance), np.inf, distance))
+    clearance = np.minimum.reduce(segments)
+    opposite = -side * lines[0] > 0
+    for strict in (True, False):
+        for bins in ZERO_LABEL_BINS:
+            best: tuple[float, int] | None = None
+            for chunk in np.array_split(np.arange(count), bins):
+                if not len(chunk) or chunk[0] + width > count:
+                    continue
+                first = int(chunk[0])
+                room = float(clearance[first : first + width - 1].min())
+                if room <= 0 or (strict and not opposite[first : first + width].all()):
+                    continue
+                if best is None or room > best[0]:
+                    best = (room, first)
+            if best is not None:
+                return best[1]
+    return None
 
 
 def _fade(color: str, alpha: float) -> str:
