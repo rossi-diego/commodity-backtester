@@ -21,12 +21,12 @@ from src.visualization import (
     MUTED,
     OIL,
     SURFACE,
-    YEAR_GREYS,
+    YEAR_COLORS,
     by_month_figure,
     history_figure,
 )
 
-TOKENS = {SURFACE, INK_SERIES, MUTED, GRID, AXIS, CRUSH, OIL, MEAL, FLAT, *YEAR_GREYS}
+TOKENS = {SURFACE, INK_SERIES, MUTED, GRID, AXIS, CRUSH, OIL, MEAL, FLAT, *YEAR_COLORS}
 HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
 
 
@@ -133,19 +133,32 @@ class TestHistory:
 
 
 class TestByMonth:
-    def test_current_year_bold_past_years_grey_newest_first(self, tables) -> None:
+    def test_current_year_bold_past_years_in_their_own_colours(self, tables) -> None:
         crush, _ = tables
         fig, _ = _by_month(crush)
         year = crush.index[-1].year
         current = _trace(fig, str(year))
         assert current.line.color == CRUSH
         assert current.line.width > _trace(fig, str(year - 1)).line.width
-        assert _trace(fig, str(year - 1)).line.color == YEAR_GREYS[0]
-        assert _trace(fig, str(year - 3)).line.color == YEAR_GREYS[2]
+        assert _trace(fig, str(year - 1)).line.color == YEAR_COLORS[0]
+        assert _trace(fig, str(year - 3)).line.color == YEAR_COLORS[2]
+        past = {_trace(fig, str(year - back)).line.color for back in (1, 2, 3)}
+        assert len(past) == 3
+        assert CRUSH not in past
         assert list(current.x) == MONTHS
         assert fig.layout.legend.traceorder == "reversed"
         lines = [name for name in _names(fig) if name and name.isdigit()]
         assert lines == [str(year - 3), str(year - 2), str(year - 1), str(year)]
+
+    def test_a_year_keeps_its_colour_whichever_others_are_picked(self, tables) -> None:
+        crush, _ = tables
+        year = crush.index[-1].year
+        alone, _ = _by_month(crush, years=[year - 3])
+        assert _trace(alone, str(year - 3)).line.color == YEAR_COLORS[2]
+        far, _ = _by_month(crush, years=[year - 1, year - 6])
+        assert _trace(far, str(year - 6)).line.color == YEAR_COLORS[0]
+        assert _trace(far, str(year - 6)).line.dash == "dash"
+        assert _trace(far, str(year - 1)).line.dash is None
 
     def test_month_to_date_is_a_hollow_marker_off_the_line(self, tables) -> None:
         crush = tables[0]

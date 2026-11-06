@@ -417,6 +417,6 @@ class TestDarkTheme:
             visualization.OIL,
             visualization.MEAL,
             visualization.FLAT,
-            *visualization.YEAR_GREYS,
+            *visualization.YEAR_COLORS,
         ):
             assert _contrast(color, visualization.SURFACE) >= 3
