@@ -45,6 +45,15 @@ def _expected_keys(last_year: int) -> set[str]:
         "crush_record_low_flagged",
         "median_abs_change_off_pair",
         "median_abs_change_board_pair",
+        "risk_date",
+        "risk_changes",
+        "risk_vol_20_usd_t",
+        "risk_vol_1y_usd_t",
+        "risk_var_usd",
+        "risk_es_usd",
+        "risk_share_oil",
+        "risk_share_meal",
+        "risk_share_beans",
     }
 
 

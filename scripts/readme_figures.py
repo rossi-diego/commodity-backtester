@@ -17,7 +17,7 @@ from src.constants import BUSHELS_PER_TONNE, GALLONS_PER_M3
 from src.data_loader import load_prices
 from src.margins import add_rins, crush_table, gap_table, rin_per_m3
 from src.rins import load_d4
-from src.risk import clean_changes
+from src.risk import clean_changes, risk_summary
 from src.rolls import off_pair
 from src.seasonal import yearly_means
 
@@ -84,6 +84,17 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
     off = off_pair(pd.DatetimeIndex(changes.index)).to_numpy()
     figures["median_abs_change_off_pair"] = _rounded(float(changes[off].median()), 2)
     figures["median_abs_change_board_pair"] = _rounded(float(changes[~off].median()), 2)
+
+    risk = risk_summary(crush)
+    if risk is not None:
+        figures["risk_date"] = risk.date.date().isoformat()
+        figures["risk_changes"] = risk.changes
+        figures["risk_vol_20_usd_t"] = _rounded(risk.vol_20, 2)
+        figures["risk_vol_1y_usd_t"] = _rounded(risk.vol_1y, 2)
+        figures["risk_var_usd"] = _rounded(risk.var)
+        figures["risk_es_usd"] = _rounded(risk.es)
+        for leg, share in risk.contributions.items():
+            figures[f"risk_share_{leg}"] = _rounded(share * 100)
     return figures
 
 

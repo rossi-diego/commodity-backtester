@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from src.text import METHOD, READING_BY_MONTH, READING_HISTORY, READING_RIN, WHAT
+from src.text import METHOD, READING_BY_MONTH, READING_HISTORY, READING_RIN, RISK_NOTE, WHAT
 
 # The gap rail appends this when the RIN is on and the view is by month.
 RIN_SUFFIX = " RIN months use EPA weeks only."
@@ -26,6 +26,10 @@ def test_what_it_is_fits_the_rail(key) -> None:
 )
 def test_reading_fits_the_rail(text) -> None:
     assert _words(text) <= 35
+
+
+def test_risk_note_fits_under_the_strip() -> None:
+    assert _words(RISK_NOTE) <= 30
 
 
 def test_method_cards_have_equal_budgets() -> None:

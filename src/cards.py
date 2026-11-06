@@ -10,6 +10,15 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
+from .risk import (
+    ES_LEVEL,
+    MIN_CHANGES,
+    NOTIONAL_TONNES,
+    SHORT_VOL_SESSIONS,
+    VAR_LEVEL,
+    RiskSummary,
+)
+
 __all__ = [
     "Kpi",
     "MethodCard",
@@ -18,6 +27,7 @@ __all__ = [
     "ordinal",
     "percentile_html",
     "rail_html",
+    "risk_strip_html",
     "section_head_html",
     "split_bar_html",
 ]
@@ -118,6 +128,42 @@ def rail_html(what: str, reading: str, today: list[tuple[str, str]]) -> str:
         f"<div><h3>Reading the chart</h3><p>{html.escape(reading)}</p></div>"
         f'<div class="cm-today"><h3>Today</h3><dl>{rows}</dl></div></div>'
     )
+
+
+def _signed_percent(share: float) -> str:
+    # A typographic minus, as in the page's USD values.
+    shown = round(share * 100)
+    sign = "−" if shown < 0 else ("+" if shown > 0 else "")
+    return f"{sign}{abs(shown)}%"
+
+
+def _dollars(value: float) -> str:
+    return f"{'−' if round(value) < 0 else ''}${abs(value):,.0f}"
+
+
+def risk_strip_html(summary: RiskSummary | None, note: str) -> str:
+    """The 1-day risk of the crush in one row of four cells, under its chart."""
+    footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
+    if summary is None:
+        line = f"n/a: under {MIN_CHANGES} clean daily changes"
+        return f'<div class="cm-risk"><p class="cm-risk-na">{html.escape(line)}</p>{footer}</div>'
+    legs = " · ".join(
+        f"{leg} {_signed_percent(share)}" for leg, share in summary.contributions.items()
+    )
+    cells = [
+        (
+            f"Daily σ, {SHORT_VOL_SESSIONS} sessions / 1 year",
+            f"${summary.vol_20:,.2f}/t / ${summary.vol_1y:,.2f}/t",
+        ),
+        (f"1-day VaR {VAR_LEVEL:.0%}, {NOTIONAL_TONNES:,} t", _dollars(summary.var)),
+        (f"ES {ES_LEVEL:.1%}", _dollars(summary.es)),
+        ("Risk by leg", legs),
+    ]
+    rows = "".join(
+        f'<div class="cm-risk-cell"><dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd></div>'
+        for label, value in cells
+    )
+    return f'<div class="cm-risk"><dl>{rows}</dl>{footer}</div>'
 
 
 def method_row_html(cards: list[MethodCard]) -> str:

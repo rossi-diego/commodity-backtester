@@ -9,6 +9,7 @@ __all__ = ["APP_CSS"]
 # Amber means "the crush margin" and nothing else: controls and the other cards stay neutral.
 # The rules target Streamlit test ids and key classes, so redo the screenshots when upgrading.
 # The top padding clears the 56 px bar Streamlit Cloud draws over the app from its parent page.
+# The risk strip labels keep their case: uppercase would turn σ into Σ.
 APP_CSS: Final[str] = """<style>
 :root{--page:#0b1016;--card:#141b23;--raised:#1e2732;--line:#2a3440;--ink:#eef2f6;--mut:#a3afbd;--head:linear-gradient(115deg,#1a2430 0%,#16212c 55%,#3a2c10 100%);--crush:#c58512;--oil:#4d8fe8;--meal:#c76fae;--step:rgba(255,255,255,.07)}
 [data-testid='stMainBlockContainer']{max-width:1480px;margin:0 auto;padding:3.75rem 2rem 2rem}
@@ -66,6 +67,13 @@ APP_CSS: Final[str] = """<style>
 .cm-today dl{display:grid;grid-template-columns:1fr auto;gap:.25rem .75rem;margin:0;padding:0}
 .cm-today dt{margin:0;padding:0;color:var(--mut)}
 .cm-today dd{margin:0;padding:0;text-align:right;font-variant-numeric:tabular-nums}
+.cm-risk{border-top:1px solid var(--line);padding-top:.75rem;color:var(--ink)}
+.cm-risk dl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem 1.25rem;margin:0;padding:0}
+.cm-risk-cell{min-width:0}
+.cm-risk dt{margin:0 0 .2rem;padding:0;font-size:.75rem;font-weight:500;color:var(--mut)}
+.cm-risk dd{margin:0;padding:0;font-size:.9375rem;font-weight:600;font-variant-numeric:tabular-nums}
+.cm-risk-na{margin:0;font-size:.875rem;color:var(--mut)}
+.cm-risk-note{margin:.6rem 0 0;font-size:.78rem;line-height:1.35;color:var(--mut)}
 .cm-method{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .cm-method section{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--line);border-radius:10px;padding:.9rem 1rem}
 .cm-method h2{font-size:.9375rem;font-weight:600;margin:0 0 .5rem;padding:0;color:var(--ink)}
@@ -86,6 +94,9 @@ APP_CSS: Final[str] = """<style>
  [class*='st-key-card-sec'] [data-testid='stColumn']{min-width:100%}
  .cm-value{font-size:1.625rem}
 }
+@media (max-width:1023px){
+ .cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media (max-width:760px){
  .cm-kpis{grid-template-columns:1fr;grid-template-rows:none;gap:12px}
  .cm-kpi{grid-row:auto;grid-template-rows:none}
@@ -99,6 +110,7 @@ APP_CSS: Final[str] = """<style>
  .cm-q{font-size:1rem}
  .cm-steps{display:none}
  [class*='st-key-card-sec']{padding:.7rem .8rem}
+ .cm-risk dl{grid-template-columns:1fr}
  [data-testid='stPlotlyChart'] .nsewdrag{pointer-events:none}
  [data-testid='stPlotlyChart'] .modebar-container{display:none}
 }

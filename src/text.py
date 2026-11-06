@@ -59,6 +59,12 @@ READING_RIN: Final[str] = (
     "oil cost. Dashed: EPA price held. Grey: before the RIN."
 )
 
+# Under the crush chart's risk strip, at most 30 words.
+RISK_NOTE: Final[str] = (
+    "1-day historical simulation on clean daily changes of the past 5 years, long 1,000 t "
+    "board crush. Front-month closes, not a hedge book."
+)
+
 METHOD: Final[list[MethodCard]] = [
     MethodCard(
         "How it is calculated",
@@ -143,5 +149,8 @@ FULL_METHOD: Final[str] = (
     "a month of the five-year band needs 3 of those years. In contract months the delivery "
     "flags leave mostly the second half of the month. Ranks count clean sessions, so months "
     "without a delivery period weigh more. Part of the seasonal shape is the switch to "
-    "new-crop contracts."
+    "new-crop contracts.\n\n"
+    "**Risk.** Historical simulation on a long 1,000 t board crush: 1-day changes between "
+    "consecutive clean sessions over 5 years, so a roll jump is never a P&L. Risk by leg is "
+    "each leg's covariance with the crush over its variance."
 )

@@ -14,8 +14,11 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from src import config, visualization
+from src.cards import risk_strip_html
 from src.margins import crush_table
+from src.risk import risk_summary
 from src.seasonal import latest_reading
+from src.text import RISK_NOTE
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -177,6 +180,17 @@ class TestFirstLoad:
             assert text in hero
         assert not app.warning
 
+    def test_risk_strip_matches_the_engine(self, app, synthetic_prices) -> None:
+        app.run()
+        _no_exceptions(app)
+        summary = risk_summary(crush_table(synthetic_prices))
+        assert summary is not None
+        strip = _block(app, 'class="cm-risk"')
+        assert strip == risk_strip_html(summary, RISK_NOTE)
+        assert strip.count('class="cm-risk-cell"') == 4
+        assert f"${summary.var:,.0f}" in strip
+        assert _html(app).count('class="cm-risk"') == 1
+
     def test_footer_dates_the_data_and_disclaims(self, app, synthetic_prices) -> None:
         app.run()
         footer = app.caption[-1].value
@@ -333,6 +347,18 @@ class TestDataStates:
         ]
         st.cache_data.clear()
 
+    def test_short_history_has_no_risk_numbers(
+        self, tmp_path, monkeypatch, synthetic_prices
+    ) -> None:
+        at = _cached_app(monkeypatch, tmp_path, synthetic_prices.iloc[-200:])
+        with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
+            at.run()
+        _no_exceptions(at)
+        strip = _block(at, 'class="cm-risk"')
+        assert "n/a: under 250 clean daily changes" in strip
+        assert "cm-risk-cell" not in strip
+        st.cache_data.clear()
+
     def test_card_says_when_the_latest_close_is_flagged(self, tmp_path, monkeypatch) -> None:
         """A frame ending inside November delivery: the reading uses an earlier clean date."""
         dates = pd.bdate_range("2019-01-02", "2025-11-12")
@@ -424,6 +450,8 @@ class TestDarkTheme:
         assert theme["primaryColor"] != tokens["crush"]
         rules = [line for line in CSS.splitlines() if "var(--crush)" in line]
         assert rules and all(line.startswith(".cm-kpi-crush") for line in rules)
+        risk = [line for line in CSS.splitlines() if ".cm-risk" in line]
+        assert risk and not any("--crush" in line for line in risk)
 
     @pytest.mark.parametrize(
         ("text", "surface"),

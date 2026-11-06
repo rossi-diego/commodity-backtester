@@ -23,6 +23,7 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
 | 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
 | 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
+| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over 20 sessions and 1 year, 1-day VaR 95% and ES 97.5% on a long 1,000 t board crush, and each leg's share of the risk | USD per tonne and USD |
 
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
@@ -62,6 +63,28 @@ Every figure in this README comes from `python -m scripts.readme_figures` (data 
 The D4 does not simply close the gap, because the gap is not the producer's whole bill. A negative value after the RIN is what is left to pay for conversion (methanol, energy, the plant) and for margin. Through 2024 the $1/gal blenders' tax credit (BTC, 264 USD/m³) paid part of the gap ([AFDC](https://afdc.energy.gov/laws/395)), and from 2025 the 45Z clean fuel production credit replaced it, with a value that depends on carbon intensity ([IRS](https://www.irs.gov/credits-deductions/clean-fuel-production-credit)). LCFS credits pay in some states ([AFDC](https://afdc.energy.gov/laws/6308)), and renewable diesel, at 1.7 RINs per gallon ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)), is the marginal gallon.
 
 On 2026-11-05 the RIN value exceeds the feedstock gap by about 743 USD/m³, using a D4 price held since the last EPA week while heating oil kept moving, before conversion costs.
+
+## Risk on a notional crush
+
+Under the crush chart, one row gives the 1-day risk of a long board crush of 1,000 t of soybeans: long meal and oil, short soybeans. It is a historical simulation on front-month closes, not a hedge book.
+
+| Measure | Formula |
+|---|---|
+| Daily change | Δcrush between two consecutive sessions that are both clean, in USD/t. A change that touches a flagged session is dropped, so a roll jump is never a P&L |
+| Window | The 5 years to the last clean change, the same as the ranks. Under 250 changes, the page shows n/a |
+| P&L | 1,000 t × Δcrush |
+| Daily σ | Standard deviation of Δcrush over the last 20 changes and over the last year, in USD/t, not annualised |
+| VaR 95% | −(5% quantile of the P&L), linear interpolation, 1 day, no square-root-of-time scaling |
+| ES 97.5% | −(mean of the P&L at or below its 2.5% quantile) |
+| Risk by leg | cov(leg, Δcrush) / var(Δcrush) for meal, oil and −soybeans. The three add up to 100%, and a leg that offsets the others is negative |
+
+On the clean changes to 2026-10-29 (685 in 5 years; data to 2026-11-05):
+
+| Daily σ, 20 changes | Daily σ, 1 year | 1-day VaR 95% | 1-day ES 97.5% | Risk by leg |
+|---:|---:|---:|---:|---|
+| 3.91 USD/t | 3.66 USD/t | 5,852 USD | 8,294 USD | oil 51%, meal 31%, soybeans 17% |
+
+A change needs two clean ends, so 685 changes in 5 years is about 137 a year. That is why the window is 5 years: one year would leave about 3 scenarios beyond the 97.5% quantile.
 
 ## Rolls and delivery
 
@@ -104,10 +127,11 @@ src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg dr
 src/rolls.py     contract calendars: delivery and switch flags
 src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
 src/seasonal.py  latest clean reading, 5-year percentile, monthly averages by year
-src/risk.py      daily changes between consecutive clean sessions
+src/risk.py      daily changes between consecutive clean sessions; 1-day VaR, ES and risk by leg
    |
    v
-src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy) -> app.py (Streamlit page)
+src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy)
+   + src/styles.py (page CSS) -> app.py (Streamlit page)
 ```
 
 Logs use `key=value` fields, for example `event=data_load source=cache rows=6711 as_of=2026-10-30`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
@@ -151,7 +175,7 @@ soybean-crush-margin/
 │   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
 │   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions
-│   ├── risk.py                 # Daily changes between clean sessions
+│   ├── risk.py                 # Clean daily changes, 1-day VaR, ES and risk by leg
 │   ├── visualization.py        # Plotly figure builders, no UI imports
 │   ├── cards.py                # HTML for the cards, rails and method notes
 │   ├── styles.py               # The page CSS

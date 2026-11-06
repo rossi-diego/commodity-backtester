@@ -17,6 +17,7 @@ from src.cards import (
     kpi_row_html,
     method_row_html,
     rail_html,
+    risk_strip_html,
     section_head_html,
     split_bar_html,
 )
@@ -24,6 +25,7 @@ from src.constants import BUSHELS_PER_TONNE
 from src.data_loader import LoadResult, load_prices
 from src.margins import add_rins, crush_table, gap_table, per_gallon
 from src.rins import RinResult, load_d4
+from src.risk import RiskSummary, risk_summary
 from src.seasonal import (
     LOOKBACK_YEARS,
     Reading,
@@ -41,6 +43,7 @@ from src.text import (
     READING_HISTORY,
     READING_RIN,
     REPOSITORY_URL,
+    RISK_NOTE,
     SCOPE,
     WHAT,
 )
@@ -325,8 +328,12 @@ def _section(
     body: Callable[[Controls], SectionBody],
     years: list[int],
     rin: bool | None = None,
+    footer: str = "",
 ) -> None:
-    """One chart card: title and sentence, view switch, options, chart and its rail."""
+    """One chart card: title and sentence, view switch, options, chart and its rail.
+
+    ``footer`` is markup from ``src.cards``, drawn across the card under the chart.
+    """
     with st.container(key=f"card-sec-{key}"):
         head_col, view_col = st.columns([5, 2], vertical_alignment="center")
         head = head_col.empty()
@@ -348,10 +355,12 @@ def _section(
             _chart(shown.figure, key)
         with rail_col:
             st.html(rail_html(WHAT[key], shown.reading, shown.today))
+        if footer:
+            st.html(footer)
 
 
 @st.fragment
-def _crush_section(table: pd.DataFrame, reading: Reading) -> None:
+def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | None) -> None:
     def body(c: Controls) -> SectionBody:
         means, counts = monthly_means(table["crush"], table["flagged"])
         versus = month_vs_average(means, reading.date)
@@ -396,7 +405,14 @@ def _crush_section(table: pd.DataFrame, reading: Reading) -> None:
         sentence = _month_sentence(means, reading.date, reading.latest_date, lambda v: _usd(v, "t"))
         return SectionBody(sentence, fig, READING_BY_MONTH, today)
 
-    _section("crush", 1, "Crush margin", body, _past_years(table.index, reading.latest_date.year))
+    _section(
+        "crush",
+        1,
+        "Crush margin",
+        body,
+        _past_years(table.index, reading.latest_date.year),
+        footer=risk_strip_html(risk, RISK_NOTE),
+    )
 
 
 @st.fragment
@@ -584,6 +600,7 @@ def main() -> None:
 
     rins = _load_rins()
     crush, gap = _tables(loaded.prices, rins.prices)
+    risk = risk_summary(crush)
     readings = {
         "crush": latest_reading(crush["crush"], crush["flagged"]),
         "share": latest_reading(crush["oil_share"], crush["flagged"]),
@@ -598,7 +615,7 @@ def main() -> None:
         return
 
     _kpis(crush, gap, readings, rins)
-    _crush_section(crush, readings["crush"])
+    _crush_section(crush, readings["crush"], risk)
     if readings["share"] is not None:
         _share_section(crush, readings["share"])
     if readings["gap"] is None:

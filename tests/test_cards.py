@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from src.cards import (
@@ -12,9 +13,11 @@ from src.cards import (
     ordinal,
     percentile_html,
     rail_html,
+    risk_strip_html,
     section_head_html,
     split_bar_html,
 )
+from src.risk import RiskSummary
 
 
 @pytest.mark.parametrize(
@@ -87,6 +90,44 @@ def test_rail_has_three_blocks() -> None:
     markup = rail_html("What", "Read", [("Board crush", "$2.27/bu")])
     assert markup.count("<h3>") == 3
     assert "<dt>Board crush</dt><dd>$2.27/bu</dd>" in markup
+
+
+class TestRiskStrip:
+    def _summary(self, **kwargs) -> RiskSummary:
+        values = {
+            "date": pd.Timestamp("2026-11-05"),
+            "vol_20": 4.567,
+            "vol_1y": 5.0,
+            "var": 8123.4,
+            "es": 11234.6,
+            "contributions": {"oil": 0.62, "meal": 0.71, "beans": -0.33},
+            "changes": 700,
+        }
+        return RiskSummary(**(values | kwargs))
+
+    def test_four_cells_with_signed_leg_shares(self) -> None:
+        markup = risk_strip_html(self._summary(), "note")
+        assert markup.count('class="cm-risk-cell"') == 4
+        assert "<dd>$4.57/t / $5.00/t</dd>" in markup
+        assert "Daily σ, 20 sessions / 1 year" in markup
+        assert "1-day VaR 95%, 1,000 t</dt><dd>$8,123</dd>" in markup
+        assert "ES 97.5%</dt><dd>$11,235</dd>" in markup
+        assert "oil +62% · meal +71% · beans −33%" in markup
+        assert "n/a" not in markup
+
+    def test_text_is_escaped(self) -> None:
+        markup = risk_strip_html(self._summary(), "a < b & c")
+        assert "a &lt; b &amp; c" in markup
+        assert "a < b" not in markup
+
+    def test_no_summary_is_one_line(self) -> None:
+        markup = risk_strip_html(None, "note")
+        assert "cm-risk-cell" not in markup
+        assert "n/a: under 250 clean daily changes" in markup
+
+    def test_a_rounded_zero_has_no_sign(self) -> None:
+        summary = self._summary(contributions={"oil": 0.002, "meal": 1.0, "beans": -0.002})
+        assert "oil 0% · meal +100% · beans 0%" in risk_strip_html(summary, "")
 
 
 def test_method_row() -> None:
