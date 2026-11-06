@@ -135,6 +135,14 @@ class TestFirstLoad:
             app.caption[-1].value
         )
 
+    def test_rin_card_compares_with_heating_oil_plus_the_rin(self, app) -> None:
+        """The fixture runs to today and the seed D4 stops weeks earlier, so the RIN is held."""
+        app.run()
+        cards = _text(_kpis(app))
+        assert re.search(r"(less|more) than heating oil plus the RIN", cards)
+        assert "D4 price held." in cards
+        assert "BTC/45Z and LCFS" in cards
+
     def test_rin_toggle_changes_the_chart_and_the_sentence(self, app) -> None:
         app.run()
         assert "Oil minus heating oil, USD per m" in _chart(app, "gap")
@@ -370,6 +378,17 @@ class TestSource:
         assert "unsafe_allow_html" not in page
         assert page.count("<style>") == 1
         assert "<script" not in page
+
+    def test_no_claim_that_the_rin_covers_the_oil(self) -> None:
+        """The RIN only offsets part of the bill: the copy states the arithmetic, not a verdict."""
+        texts = [
+            SOURCE,
+            README,
+            *(p.read_text(encoding="utf-8") for p in (ROOT / "src").glob("*.py")),
+        ]
+        for text in texts:
+            for phrase in ("covers the oil", "closes the gap", "as the theory"):
+                assert phrase not in text
 
     def test_charts_use_no_streamlit_theme(self) -> None:
         """Without theme=None Streamlit silently replaces the axis colours of the figures."""

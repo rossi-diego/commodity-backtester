@@ -131,8 +131,11 @@ def _median_5y(values: pd.Series, flagged: pd.Series, date: pd.Timestamp) -> flo
 
 def _after_words(value: float) -> str:
     if value < 0:
-        return f"fuel value covers the oil by {_usd(-value, 'm³')} ({_usd(-per_gallon(value), 'gal', decimals=2)})"
-    return f"the oil still costs {_usd(value, 'm³')} more than fuel value"
+        return (
+            f"the oil costs {_usd(-value, 'm³')} ({_usd(-per_gallon(value), 'gal', decimals=2)}) "
+            "less than heating oil plus the RIN"
+        )
+    return f"the oil still costs {_usd(value, 'm³')} more than heating oil plus the RIN"
 
 
 def _rin_note(rins: RinResult, latest: pd.Timestamp) -> str:
@@ -207,11 +210,11 @@ def _kpis(
         cards.append(Kpi("gap", 3, "Oil cost vs diesel", "n/a", "", "Prices missing.", None, ""))
     else:
         after = gap["after_rin"].where(~gap["flagged"]).dropna()
-        detail = (
-            "D4 RIN prices could not be loaded."
-            if after.empty
-            else f"With the D4 RIN: {_after_words(float(after.iloc[-1]))}."
-        )
+        detail = "D4 RIN prices could not be loaded."
+        if not after.empty:
+            detail = f"With the D4 RIN: {_after_words(float(after.iloc[-1]))}."
+            if bool(gap.loc[after.index[-1], "rin_held"]):
+                detail += " D4 price held."
         side = "dearer" if before.value >= 0 else "cheaper"
         cards.append(
             Kpi(
@@ -222,7 +225,7 @@ def _kpis(
                 note=f"oil {side} · {_usd(per_gallon(before.value), 'gal', signed=True, decimals=2)}",
                 detail=detail,
                 percentile=before.percentile,
-                caption=f"{_rin_note(rins, before.latest_date)}. Feedstock only: before conversion costs, 45Z and LCFS.",
+                caption=f"{_rin_note(rins, before.latest_date)}. Feedstock only: before conversion costs, BTC/45Z and LCFS.",
             )
         )
     st.html(kpi_row_html(cards))
@@ -482,7 +485,7 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
                 y_title=y_title,
                 reference=reference,
                 held=held,
-                zero_labels=("oil dearer", "fuel covers the oil" if rin_on else "oil cheaper"),
+                zero_labels=("oil dearer", "oil cheaper after RIN" if rin_on else "oil cheaper"),
                 hover={"Oil feedstock": shown["feedstock"], "Heating oil": shown["diesel"]},
             )
             if rin_on:

@@ -7,17 +7,20 @@ out before anything is computed, so an expiry artefact cannot set a record.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
 
 import pandas as pd
 
 __all__ = [
     "LOOKBACK_YEARS",
+    "MIN_BAND_YEARS",
     "Reading",
     "latest_reading",
     "month_vs_average",
     "monthly_band",
     "monthly_means",
     "range_52w",
+    "yearly_means",
 ]
 
 LOOKBACK_YEARS = 5
@@ -25,6 +28,8 @@ LOOKBACK_YEARS = 5
 # progress needs fewer, and is drawn as "to date".
 MIN_SESSIONS = 5
 MIN_SESSIONS_TO_DATE = 3
+# A month of the five-year band needs this many past years with an average.
+MIN_BAND_YEARS: Final = 3
 
 
 @dataclass(frozen=True)
@@ -101,13 +106,17 @@ def monthly_means(values: pd.Series, flagged: pd.Series) -> tuple[pd.DataFrame, 
 
 
 def monthly_band(means: pd.DataFrame, year: int) -> pd.DataFrame:
-    """Low, average and high of the monthly averages over the five years before ``year``."""
+    """Low, average and high of the monthly averages over the five years before ``year``.
+
+    A month with fewer than ``MIN_BAND_YEARS`` past years is left empty.
+    """
     years = pd.Index(means.columns).astype(int)
     past = means.loc[:, (years >= year - LOOKBACK_YEARS) & (years < year)]
-    return pd.DataFrame(
+    band = pd.DataFrame(
         {"low": past.min(axis=1), "average": past.mean(axis=1), "high": past.max(axis=1)},
         index=means.index,
     )
+    return band.where(past.count(axis=1) >= MIN_BAND_YEARS)
 
 
 def month_vs_average(means: pd.DataFrame, date: pd.Timestamp) -> tuple[float, float] | None:
@@ -119,6 +128,21 @@ def month_vs_average(means: pd.DataFrame, date: pd.Timestamp) -> tuple[float, fl
     if pd.isna(current) or pd.isna(average):
         return None
     return float(current), float(average)
+
+
+def yearly_means(
+    values: pd.Series, flagged: pd.Series, unranked: pd.Series | None = None
+) -> pd.Series:
+    """Average of clean sessions by calendar year, leaving out ``unranked`` sessions."""
+    clean = _clean(values, flagged)
+    if unranked is not None:
+        clean = clean[~unranked.reindex(clean.index, fill_value=False).astype(bool)]
+    if clean.empty:
+        return pd.Series(dtype=float, index=pd.Index([], dtype=int, name="year"))
+    years = pd.DatetimeIndex(clean.index).year
+    means = clean.groupby(years).mean()
+    means.index = pd.Index(means.index.astype(int), name="year")
+    return means.astype(float)
 
 
 def range_52w(values: pd.Series, flagged: pd.Series, date: pd.Timestamp) -> tuple[float, float]:

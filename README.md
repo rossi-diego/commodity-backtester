@@ -46,15 +46,30 @@ Unit conversions use the exact definitions (1 lb = 0.45359237 kg, 1 US gallon = 
 
 On 2026-10-27 the crush margin was 88.43 USD/t (2.41 USD/bu), oil was 50% of the product value, and soybean oil cost 1,324 USD per m³ of biodiesel against 1,262 USD/m³ for heating oil. `tests/test_margins.py` asserts these figures from that day's closes.
 
-With the D4 RIN at 2.09 USD in the week of 2026-09-21, the credit is worth about 829 USD per m³ of biodiesel. In yearly averages the gap before the credit was +236 USD/m³ in 2024 and +366 in 2025, and after it −66 and −3: the RIN price moves to close the feedstock gap, as the theory of the credit predicts.
+The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per m³ of biodiesel. Yearly averages of the oil cost against heating oil, in USD/m³, on clean sessions, with held RIN prices excluded:
+
+| Year | Gap before the RIN | Gap after the RIN |
+|---|---:|---:|
+| 2021 | +604 | +85 |
+| 2022 | +471 | −160 |
+| 2023 | +385 | −232 |
+| 2024 | +236 | −72 |
+| 2025 | +361 | −2 |
+| 2026 (to date) | +334 | −288 |
+
+Every figure in this README comes from `python -m scripts.readme_figures` (data to 2026-11-05).
+
+The D4 does not simply close the gap, because the gap is not the producer's whole bill. A negative value after the RIN is what is left to pay for conversion (methanol, energy, the plant) and for margin. Through 2024 the $1/gal blenders' tax credit (BTC, 264 USD/m³) paid part of the gap ([AFDC](https://afdc.energy.gov/laws/395)), and from 2025 the 45Z clean fuel production credit replaced it, with a value that depends on carbon intensity ([IRS](https://www.irs.gov/credits-deductions/clean-fuel-production-credit)). LCFS credits pay in some states ([AFDC](https://afdc.energy.gov/laws/6308)), and renewable diesel, at 1.7 RINs per gallon ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)), is the marginal gallon.
+
+On 2026-11-05 the RIN value exceeds the feedstock gap by about 743 USD/m³, using a D4 price held since the last EPA week while heating oil kept moving, before conversion costs.
 
 ## Rolls and delivery
 
 Yahoo Finance's continuous `=F` series stay in the nearest contract until its last trading day, so they trade through the delivery period and then jump to the next contract. A trader who does not take delivery would have rolled before first notice.
 
-`src/rolls.py` rebuilds approximate CBOT and NYMEX contract calendars and flags every session where a leg is in its delivery period or has just switched contract. Flagged sessions are drawn as a thin grey line and left out of every range and percentile: about 4 in 10 sessions for the crush. Measured on 2000 to 2026, they hold 19 of the 20 largest daily moves in the crush, including the record low of −1.82 USD/bu on 2008-09-12, which was an expiring September contract and not a real margin.
+`src/rolls.py` rebuilds approximate CBOT and NYMEX contract calendars and flags every session where a leg is in its delivery period or has just switched contract. Flagged sessions are drawn as a thin grey line and left out of every range and percentile: 42% of crush sessions. Measured on 2000 to 2026, they hold 19 of the 20 largest daily moves in the crush, including the record low of −1.82 USD/bu on 2008-09-12, which was an expiring September contract and not a real margin.
 
-From mid-September to mid-December the front months are not the board crush pair: November beans trade against October, then December, products, and January beans against December products. Those sessions are kept, because their daily changes match clean sessions (median 0.86 against 0.89 USD/t), but their level includes a product calendar spread.
+From about 15 October, November beans against December products is the CME board pair. Two stretches are not: late September (Nov beans, Oct products) and the second half of November (Jan beans, Dec products); the rest of each off-pair stretch is already flagged as product delivery. Those sessions are kept, because their daily changes between clean sessions match the board pair's (median 0.86 against 0.89 USD/t), but their level includes a product calendar spread.
 
 ## D4 RIN prices
 
@@ -69,7 +84,7 @@ These are deliberate limits for a project built on free data. A production desk 
 | Left out | Why it matters |
 |---|---|
 | Plant costs, energy, freight, local basis | The page shows a gross board margin, not plant profit |
-| The 45Z and LCFS credits | They can decide biodiesel profitability, and depend on carbon intensity and state rules |
+| The BTC, 45Z and LCFS credits | The $1/gal blenders' tax credit ran (often renewed retroactively) to 2024; 45Z replaced it in 2025. 45Z and LCFS depend on carbon intensity and state rules |
 | Who keeps the RIN | The RIN goes to whoever blends the fuel, so a producer earns it only through the price of biodiesel |
 | Daily RIN prices | Daily assessments (Argus, OPIS, Fastmarkets) are paid; the EPA series is weekly and published monthly |
 | Energy content | Biodiesel holds about 7% less energy than diesel per unit of volume ([AFDC](https://afdc.energy.gov/fuels/properties)); the gap compares volumes |
@@ -89,6 +104,7 @@ src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg dr
 src/rolls.py     contract calendars: delivery and switch flags
 src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
 src/seasonal.py  latest clean reading, 5-year percentile, monthly averages by year
+src/risk.py      daily changes between consecutive clean sessions
    |
    v
 src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy) -> app.py (Streamlit page)
@@ -112,11 +128,11 @@ The first run downloads about 26 years of daily closes from Yahoo Finance, which
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                  # tests, and src coverage of at least 95%
-ruff format --check src/ tests/ app.py  # formatting
-ruff check src/ tests/ app.py           # lint
-mypy src/ app.py                        # type-check, strict
-pip-audit -r requirements.txt --strict  # known vulnerabilities in the runtime pins
+pytest                                           # tests, and src coverage of at least 95%
+ruff format --check src/ tests/ scripts/ app.py  # formatting
+ruff check src/ tests/ scripts/ app.py           # lint
+mypy src/ app.py scripts/                        # type-check, strict
+pip-audit -r requirements.txt --strict           # known vulnerabilities in the runtime pins
 ```
 
 ## Project structure
@@ -135,10 +151,12 @@ soybean-crush-margin/
 │   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
 │   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions
+│   ├── risk.py                 # Daily changes between clean sessions
 │   ├── visualization.py        # Plotly figure builders, no UI imports
 │   ├── cards.py                # HTML for the cards, rails and method notes
 │   ├── styles.py               # The page CSS
 │   └── text.py                 # Page copy, held to length limits by tests
+├── scripts/readme_figures.py   # Every figure quoted in this README
 ├── tests/                      # Unit tests per module, and the page end to end with AppTest
 ├── .github/workflows/ci.yml    # CI: lint, type-check, test, audit
 ├── pyproject.toml              # Ruff, mypy, pytest configuration

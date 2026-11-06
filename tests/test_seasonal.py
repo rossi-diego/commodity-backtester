@@ -12,6 +12,7 @@ from src.seasonal import (
     monthly_band,
     monthly_means,
     range_52w,
+    yearly_means,
 )
 
 
@@ -131,6 +132,56 @@ class TestMonthlyBand:
         assert month_vs_average(means, pd.Timestamp("2026-10-27")) == (2026.0, 2023.0)
         assert month_vs_average(means, pd.Timestamp("2027-01-04")) is None
         assert month_vs_average(means, pd.Timestamp("2026-12-01")) is None
+
+
+class TestBandNeedsYears:
+    @staticmethod
+    def _means(years: list[int]) -> pd.DataFrame:
+        return pd.DataFrame(
+            {year: np.full(12, float(year)) for year in years}, index=pd.RangeIndex(1, 13)
+        )
+
+    def test_two_past_years_give_no_band(self) -> None:
+        band = monthly_band(self._means([2024, 2025, 2026]), 2026)
+        assert band.isna().all().all()
+
+    def test_three_past_years_give_a_band(self) -> None:
+        band = monthly_band(self._means([2023, 2024, 2025, 2026]), 2026)
+        assert (band["average"] == 2024).all()
+        assert (band["low"] == 2023).all()
+        assert (band["high"] == 2025).all()
+
+    def test_month_vs_average_is_none_for_a_thin_month(self) -> None:
+        means = self._means([2023, 2024, 2025, 2026])
+        means.loc[10, [2023, 2024]] = np.nan
+        assert month_vs_average(means, pd.Timestamp("2026-10-15")) is None
+        assert month_vs_average(means, pd.Timestamp("2026-09-15")) == (2026.0, 2024.0)
+
+
+class TestYearlyMeans:
+    def test_flagged_outlier_does_not_move_the_mean(self) -> None:
+        values = _series("2024-01-01", "2025-12-31")
+        values[:] = 1.0
+        flagged = _clean(values)
+        values.iloc[10] = 1_000.0
+        flagged.iloc[10] = True
+        means = yearly_means(values, flagged)
+        assert list(means.index) == [2024, 2025]
+        assert (means == 1.0).all()
+
+    def test_unranked_session_is_excluded(self) -> None:
+        values = _series("2025-01-01", "2025-12-31")
+        values[:] = 2.0
+        unranked = _clean(values)
+        values.iloc[-1] = 500.0
+        unranked.iloc[-1] = True
+        assert yearly_means(values, _clean(values), unranked).loc[2025] == 2.0
+        assert yearly_means(values, _clean(values)).loc[2025] > 2.0
+
+    def test_empty(self) -> None:
+        means = yearly_means(pd.Series(dtype=float), pd.Series(dtype=bool))
+        assert isinstance(means, pd.Series)
+        assert means.empty
 
 
 def test_range_52w_uses_clean_sessions_of_the_last_year() -> None:

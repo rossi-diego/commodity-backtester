@@ -51,12 +51,12 @@ READING_HISTORY: Final[str] = (
     "left out of every statistic."
 )
 READING_BY_MONTH: Final[str] = (
-    "Bold: this year; the hollow dot is the month to date. Thin lines: the years you pick, "
-    "each in its own colour. Band: range of the five previous years."
+    "Bold: this year; hollow dot: month to date. Thin lines: years you pick, each its own "
+    "colour. Band: range of five previous years. Clean sessions fall mostly late in the month."
 )
 READING_RIN: Final[str] = (
-    "Line: oil minus heating oil and the D4 RIN value. Below zero, fuel value covers the oil. "
-    "Dashed: last EPA price held. Grey: before the RIN."
+    "Line: oil minus heating oil and D4 RIN value. Below zero, heating oil plus RIN exceed the "
+    "oil cost. Dashed: EPA price held. Grey: before the RIN."
 )
 
 METHOD: Final[list[MethodCard]] = [
@@ -96,8 +96,8 @@ METHOD: Final[list[MethodCard]] = [
             ),
             (
                 "Pairs",
-                "from mid-September, November beans meet October products, and in late November "
-                "January beans meet December; those levels carry a product calendar spread.",
+                "late September has November beans with October products, and the second half of "
+                "November January beans with December; both carry a product calendar spread.",
             ),
         ),
         "Flags follow exchange calendars, not holidays.",
@@ -112,8 +112,8 @@ METHOD: Final[list[MethodCard]] = [
             ),
             (
                 "Credits",
-                "the 45Z and LCFS credits are not included, and the D4 RIN goes to whoever "
-                "blends the fuel, not necessarily the crusher.",
+                "the BTC (to 2024), 45Z and LCFS credits are not included, and the D4 RIN goes to "
+                "whoever blends the fuel, not necessarily the crusher.",
             ),
             (
                 "Data",
@@ -136,8 +136,12 @@ FULL_METHOD: Final[str] = (
     f"about 7% less energy than diesel ([AFDC]({AFDC_URL})).\n\n"
     "**D4 RIN prices.** Weekly volume-weighted averages of EMTS trades, read from EPA's public "
     f"RIN data ([EPA]({EPA_PAGE})). EPA dates each week by its Monday and publishes monthly, so "
-    "the latest weeks are held at the last price and drawn dashed. Renewable diesel earns 1.7 "
-    "RINs per gallon; only biodiesel is modelled.\n\n"
-    "**Monthly averages.** A month-year needs 5 clean sessions, the month in progress 3. Part "
-    "of the seasonal shape is the switch to new-crop contracts."
+    "the latest weeks are held at the last price and drawn dashed. A week's price is applied "
+    "from its Monday, so it includes trades later that week. Renewable diesel earns 1.7 RINs "
+    "per gallon; only biodiesel is modelled.\n\n"
+    "**Monthly averages.** A month-year needs 5 clean sessions, the month in progress 3, and "
+    "a month of the five-year band needs 3 of those years. In contract months the delivery "
+    "flags leave mostly the second half of the month. Ranks count clean sessions, so months "
+    "without a delivery period weigh more. Part of the seasonal shape is the switch to "
+    "new-crop contracts."
 )
