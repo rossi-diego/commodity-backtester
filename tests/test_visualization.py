@@ -238,13 +238,13 @@ class TestByMonth:
         without, _ = _by_month(crush, band=False)
         assert not any(name and name.startswith("Range") for name in _names(without))
 
-    def test_past_years_have_distinct_dashes_and_none_dotted(self, tables) -> None:
+    def test_five_past_years_have_five_colours_and_none_dotted(self, tables) -> None:
         crush, _ = tables
         year = crush.index[-1].year
         fig, _ = _by_month(crush, years=[year - n for n in range(1, 6)])
-        dashes = [_trace(fig, str(year - n)).line.dash for n in range(1, 6)]
-        assert len(set(dashes)) == 5
-        assert "dot" not in dashes
+        lines = [_trace(fig, str(year - n)).line for n in range(1, 6)]
+        assert len({line.color for line in lines}) == 5
+        assert "dot" not in {line.dash for line in lines}
         assert _trace(fig, str(year - 1)).mode == "lines+markers"
         assert _trace(fig, "Avg").line.dash == "dot"
 
