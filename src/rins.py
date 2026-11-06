@@ -164,11 +164,16 @@ def _read(path: Path) -> pd.Series | None:
         return None
     try:
         frame = pd.read_csv(path, parse_dates=["week"]).set_index("week")
+        series = frame["usd_per_rin"].astype(float).sort_index().dropna()
+        # parse_dates leaves an object index on an unparseable week, and as_of needs dates.
+        if not isinstance(series.index, pd.DatetimeIndex):
+            raise ValueError("week column is not all dates")
+        if series.empty:
+            raise ValueError("no prices")
     except Exception as exc:  # noqa: BLE001
         logger.warning("event=rin_unreadable path=%s reason=%s", path.name, exc)
         return None
-    series = frame["usd_per_rin"].astype(float).sort_index()
-    return None if series.empty else series
+    return series
 
 
 def _write(series: pd.Series, path: Path) -> None:

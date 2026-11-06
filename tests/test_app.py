@@ -19,6 +19,7 @@ from src.seasonal import latest_reading
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
+CSS = (ROOT / "src" / "styles.py").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 SECTIONS = ["crush", "share", "gap"]
 LABELS = ["Crush margin", "Oil share", "Oil cost vs diesel"]
@@ -359,15 +360,16 @@ def _contrast(first: str, second: str) -> float:
 
 @pytest.fixture()
 def tokens() -> dict[str, str]:
-    return dict(re.findall(r"--(\w+):(#[0-9a-f]{6})", SOURCE))
+    return dict(re.findall(r"--(\w+):(#[0-9a-f]{6})", CSS))
 
 
 class TestSource:
     def test_no_emoji_no_unsafe_html_one_css_block(self) -> None:
-        assert not EMOJI.search(SOURCE)
-        assert "unsafe_allow_html" not in SOURCE
-        assert SOURCE.count("<style>") == 1
-        assert "<script" not in SOURCE
+        page = SOURCE + CSS
+        assert not EMOJI.search(page)
+        assert "unsafe_allow_html" not in page
+        assert page.count("<style>") == 1
+        assert "<script" not in page
 
     def test_charts_use_no_streamlit_theme(self) -> None:
         """Without theme=None Streamlit silently replaces the axis colours of the figures."""
@@ -381,7 +383,7 @@ class TestSource:
 
     def test_page_clears_the_streamlit_cloud_bar(self) -> None:
         """The bar sits in the parent page, covers 56 px and hid the title in production."""
-        tops = re.findall(r"stMainBlockContainer'\]\{[^}]*?padding:([\d.]+)rem", SOURCE)
+        tops = re.findall(r"stMainBlockContainer'\]\{[^}]*?padding:([\d.]+)rem", CSS)
         assert len(tops) == 2
         assert all(float(top) * 15 >= 56 for top in tops)
 
@@ -401,7 +403,7 @@ class TestDarkTheme:
         with (ROOT / ".streamlit" / "config.toml").open("rb") as file:
             theme = tomllib.load(file)["theme"]
         assert theme["primaryColor"] != tokens["crush"]
-        rules = [line for line in SOURCE.splitlines() if "var(--crush)" in line]
+        rules = [line for line in CSS.splitlines() if "var(--crush)" in line]
         assert rules and all(line.startswith(".cm-kpi-crush") for line in rules)
 
     @pytest.mark.parametrize(

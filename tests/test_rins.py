@@ -131,6 +131,36 @@ class TestLoad:
         with patch("src.rins._fetch_rows", side_effect=OSError("offline")):
             assert rins.load_d4().prices is None
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "week,price\n2024-01-01,1.2\n",
+            "week,usd_per_rin\n2024-01-01,abc\n",
+            "week,usd_per_rin\nx,1.2\n",
+            "week,usd_per_rin\n",
+            "week,usd_per_rin\n2024-01-01,\n",
+        ],
+        ids=[
+            "no-price-column",
+            "price-not-a-number",
+            "week-not-a-date",
+            "header-only",
+            "price-missing",
+        ],
+    )
+    def test_bad_cache_is_ignored(self, paths, caplog, text) -> None:
+        cache, seed = paths
+        cache.write_text(text, encoding="utf-8")
+        with caplog.at_level("WARNING", logger="src.rins"):
+            assert rins._read(cache) is None
+        assert "rin_unreadable" in caplog.text
+
+        _write(seed)
+        with patch("src.rins._fetch_rows", side_effect=OSError("offline")):
+            result = rins.load_d4()
+        assert result.source == "seed"
+        assert result.as_of == WEEKS[-1].date()
+
     def test_a_failed_cache_write_keeps_the_result(self, paths) -> None:
         with (
             patch("src.rins._fetch_rows", return_value=_rows()),

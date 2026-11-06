@@ -112,10 +112,11 @@ The first run downloads about 26 years of daily closes from Yahoo Finance, which
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                  # tests and coverage
+pytest                                  # tests, and src coverage of at least 95%
 ruff format --check src/ tests/ app.py  # formatting
 ruff check src/ tests/ app.py           # lint
-mypy src/                               # type-check
+mypy src/ app.py                        # type-check, strict
+pip-audit -r requirements.txt --strict  # known vulnerabilities in the runtime pins
 ```
 
 ## Project structure
@@ -136,9 +137,10 @@ soybean-crush-margin/
 │   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions
 │   ├── visualization.py        # Plotly figure builders, no UI imports
 │   ├── cards.py                # HTML for the cards, rails and method notes
+│   ├── styles.py               # The page CSS
 │   └── text.py                 # Page copy, held to length limits by tests
 ├── tests/                      # Unit tests per module, and the page end to end with AppTest
-├── .github/workflows/ci.yml    # CI: lint, type-check, test
+├── .github/workflows/ci.yml    # CI: lint, type-check, test, audit
 ├── pyproject.toml              # Ruff, mypy, pytest configuration
 ├── requirements.txt            # Runtime dependencies, pinned
 └── requirements-dev.txt        # Development dependencies
