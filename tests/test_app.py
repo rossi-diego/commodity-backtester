@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -91,6 +92,15 @@ def _no_exceptions(at: AppTest) -> None:
     assert not at.exception, [exc.value for exc in at.exception]
 
 
+def _y_title(at: AppTest, key: str) -> str:
+    return json.loads(_chart(at, key))["layout"]["yaxis"]["title"]["text"]
+
+
+def _footer_day(date: pd.Timestamp) -> str:
+    """The footer is markdown, so its dates hold together with no-break spaces."""
+    return f"{date.day} {date:%b} {date:%Y}"
+
+
 # ---------------------------------------------------------------------------
 # First load
 # ---------------------------------------------------------------------------
@@ -134,9 +144,15 @@ class TestFirstLoad:
         app.toggle(key="rin-gap").set_value(True).run()
         _no_exceptions(app)
         assert _text(_kpis(app)) == cards
-        assert f"D4 RIN prices from EPA to the week of {week.date()}, saved copy." in (
+        assert f"D4 RIN prices from EPA to the week of {_footer_day(week)}, saved copy." in (
             app.caption[-1].value
         )
+
+    def test_gap_rank_names_its_series(self, app) -> None:
+        app.run()
+        gap_card = _kpis(app).split('cm-kpi-gap"', 1)[1]
+        assert "percentile of 5 years, before the RIN" in gap_card
+        assert 'percentile of 5 years, before the RIN"' in gap_card
 
     def test_rin_card_compares_with_heating_oil_plus_the_rin(self, app) -> None:
         """The fixture runs to today and the seed D4 stops weeks earlier, so the RIN is held."""
@@ -148,10 +164,14 @@ class TestFirstLoad:
 
     def test_rin_toggle_changes_the_chart_and_the_sentence(self, app) -> None:
         app.run()
-        assert "Oil minus heating oil, USD per m" in _chart(app, "gap")
+        assert _y_title(app, "gap") == "Oil − heating oil, USD/m³"
+        assert "dtick" not in json.loads(_chart(app, "gap"))["layout"]["yaxis"]
+        assert _y_title(app, "crush") == "USD/t of soybeans"
+        assert _y_title(app, "share") == "Oil share, %"
         app.toggle(key="rin-gap").set_value(True).run()
         _no_exceptions(app)
-        assert "Oil minus heating oil and D4 RIN" in _chart(app, "gap")
+        assert _y_title(app, "gap") == "Oil − heating oil − RIN, USD/m³"
+        assert json.loads(_chart(app, "gap"))["layout"]["yaxis"]["dtick"] == 250
         assert "Before the RIN" in _chart(app, "gap")
         assert "Oil cost vs diesel With the D4 RIN," in _head(app, "gap")
 
@@ -194,7 +214,7 @@ class TestFirstLoad:
     def test_footer_dates_the_data_and_disclaims(self, app, synthetic_prices) -> None:
         app.run()
         footer = app.caption[-1].value
-        assert f"Data to {synthetic_prices.index.max().date()}." in footer
+        assert f"Data to {_footer_day(synthetic_prices.index.max())}." in footer
         assert (
             "Personal project, not affiliated with any employer. Not investment advice." in footer
         )
@@ -219,11 +239,14 @@ class TestControls:
         _no_exceptions(app)
         year = pd.Timestamp.today().year
         spec = _chart(app, key)
-        for name in (str(year), str(year - 1), str(year - 2), "averages"):
-            assert f'"name":"{name}' in spec or name in spec
+        names = [trace.get("name") for trace in json.loads(spec)["data"]]
+        for name in (str(year), str(year - 1), str(year - 2)):
+            assert name in names
+        assert any(name and name.startswith("Range ") for name in names)
         assert "against" in _head(app, key) or "too few" in _head(app, key)
         app.checkbox(key=f"band-{key}").uncheck().run()
-        assert "averages" not in _chart(app, key)
+        names = [trace.get("name") for trace in json.loads(_chart(app, key))["data"]]
+        assert not any(name and name.startswith(("Range ", "Avg ")) for name in names)
 
     def test_years_are_capped(self, app) -> None:
         app.run()
@@ -317,8 +340,17 @@ class TestDataStates:
         with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
             at.run()
         _no_exceptions(at)
-        assert "2024-06-28 (may be out of date)" in _block(at, "cm-hero")
-        assert "2024-06-28 (may be out of date)" in at.caption[-1].value
+        hero = _block(at, "cm-hero")
+        assert '<span class="cm-nowrap">28 Jun 2024</span> (may be out of date)' in hero
+        assert "28 Jun 2024 (may be out of date)" in at.caption[-1].value
+        st.cache_data.clear()
+
+    def test_hero_dates_are_written_out_and_kept_whole(self, app) -> None:
+        app.run()
+        data_line = re.search(r'<p class="cm-meta">(.*?)</p>', _block(app, "cm-hero")).group(1)
+        assert not re.search(r"\d{4}-\d{2}-\d{2}", data_line)
+        assert re.search(r'<span class="cm-nowrap">\d{1,2} [A-Z][a-z]{2} \d{4}</span>', data_line)
+        assert not re.search(r"\d{4}-\d{2}-\d{2}", app.caption[-1].value)
         st.cache_data.clear()
 
     def test_missing_crush_leg_warns(self, tmp_path, monkeypatch, synthetic_prices) -> None:
@@ -432,6 +464,19 @@ class TestSource:
         assert len(tops) == 2
         assert all(float(top) * 15 >= 56 for top in tops)
 
+    def test_page_bottom_clears_the_streamlit_cloud_badge(self) -> None:
+        """The Cloud badge floats bottom right and covered the last card on a phone."""
+        paddings = re.findall(
+            r"stMainBlockContainer'\]\{[^}]*?padding:[\d.]+rem [\d.]+rem ([\d.]+)rem", CSS
+        )
+        assert len(paddings) == 2
+        assert all(float(bottom) >= 4.5 for bottom in paddings)
+
+    def test_option_chips_wrap_on_a_phone(self) -> None:
+        phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
+        assert "[class*='st-key-bar-'] [data-testid='stButtonGroup']" in phone
+        assert ".cm-nowrap{white-space:nowrap}" in CSS
+
 
 class TestDarkTheme:
     def test_theme_is_dark_and_matches_the_tokens(self, tokens) -> None:
@@ -461,6 +506,8 @@ class TestDarkTheme:
         assert _contrast(tokens[text], tokens[surface]) >= 4.5
 
     def test_chart_marks_are_visible_on_the_surface(self) -> None:
+        # ROLL is left out on purpose: the roll trace is faint context under the clean line,
+        # not a mark to read, and the legend names it.
         for color in (
             visualization.CRUSH,
             visualization.OIL,

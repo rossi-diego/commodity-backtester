@@ -34,6 +34,13 @@ class TestPercentile:
         assert 'style="left:75.0%"' in markup
         assert 'aria-label="75th percentile of 5 years"' in markup
 
+    def test_rank_names_its_series(self) -> None:
+        markup = percentile_html(40.0, "before the RIN")
+        assert 'aria-label="40th percentile of 5 years, before the RIN"' in markup
+        assert "<span>40th percentile of 5 years, before the RIN</span>" in markup
+        card = Kpi("gap", 3, "Gap", "$1", "", "", 40.0, "", rank_of="before the RIN")
+        assert kpi_row_html([card]).count(", before the RIN") == 2
+
     def test_no_rank_keeps_the_row(self) -> None:
         markup = percentile_html(None)
         assert "cm-mark" not in markup

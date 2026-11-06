@@ -56,7 +56,7 @@ READING_BY_MONTH: Final[str] = (
 )
 READING_RIN: Final[str] = (
     "Line: oil minus heating oil and D4 RIN value. Below zero, heating oil plus RIN exceed the "
-    "oil cost. Dashed: EPA price held. Grey: before the RIN."
+    "oil cost. Dashed: EPA price held. Dotted: before the RIN."
 )
 
 # Under the crush chart's risk strip, at most 30 words.

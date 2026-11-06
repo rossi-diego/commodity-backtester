@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import html
 import logging
 from collections.abc import Callable
@@ -228,6 +229,7 @@ def _kpis(
                 note=f"oil {side} · {_usd(per_gallon(before.value), 'gal', signed=True, decimals=2)}",
                 detail=detail,
                 percentile=before.percentile,
+                rank_of="before the RIN",
                 caption=f"{_rin_note(rins, before.latest_date)}. Feedstock only: before conversion costs, BTC/45Z and LCFS.",
             )
         )
@@ -381,7 +383,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
                 shown["flagged"],
                 name="Crush margin",
                 color=CRUSH,
-                y_title="USD per tonne of soybeans",
+                y_title="USD/t of soybeans",
                 hover={
                     "Meal value": shown["meal_value"],
                     "Oil value": shown["oil_value"],
@@ -398,7 +400,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
             years=c.years,
             current=reading.latest_date.year,
             color=CRUSH,
-            y_title="USD per tonne of soybeans",
+            y_title="USD/t of soybeans",
             band=c.band,
             month_to_date=reading.latest_date.month,
         )
@@ -433,7 +435,7 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
                 shown["flagged"],
                 name="Oil share",
                 color=OIL,
-                y_title="Oil share of product value, %",
+                y_title="Oil share, %",
                 percent=True,
                 hover={"Oil value": shown["oil_value"], "Meal value": shown["meal_value"]},
             )
@@ -450,7 +452,7 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
             years=c.years,
             current=reading.latest_date.year,
             color=OIL,
-            y_title="Oil share of product value, %",
+            y_title="Oil share, %",
             band=c.band,
             percent=True,
             month_to_date=reading.latest_date.month,
@@ -477,11 +479,7 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
         ]
         rin_on = c.rin and has_rins
         column = "after_rin" if rin_on else "gap"
-        y_title = (
-            "Oil minus heating oil and D4 RIN, USD per m³"
-            if rin_on
-            else "Oil minus heating oil, USD per m³"
-        )
+        y_title = "Oil − heating oil − RIN, USD/m³" if rin_on else "Oil − heating oil, USD/m³"
         color = OIL if rin_on else INK_SERIES
         flagged = table["flagged"] | (table["rin_held"] if rin_on else False)
         if c.view == "History":
@@ -503,6 +501,8 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
                 held=held,
                 zero_labels=("oil dearer", "oil cheaper after RIN" if rin_on else "oil cheaper"),
                 hover={"Oil feedstock": shown["feedstock"], "Heating oil": shown["diesel"]},
+                # The RIN widens the range: fixed ticks keep zero and the gap legible.
+                y_dtick=250 if rin_on else None,
             )
             if rin_on:
                 ranked = latest_reading(table[column], table["flagged"], unranked=table["rin_held"])
@@ -552,20 +552,27 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
 
 
 def _data_line(loaded: LoadResult) -> str:
-    if loaded.prices is None:
-        return f"{DATA_SOURCE}."
+    """Hero markup: the source and the data date, kept on one line."""
+    if loaded.prices is None or loaded.as_of is None:
+        return f"{html.escape(DATA_SOURCE)}."
     freshness = " (may be out of date)" if loaded.is_stale else ""
-    return f"{DATA_SOURCE}, 2000 to {loaded.as_of}{freshness}."
+    day = f'<span class="cm-nowrap">{_day(pd.Timestamp(loaded.as_of))}</span>'
+    return f"{html.escape(DATA_SOURCE)}, 2000 to {day}{freshness}."
+
+
+def _footer_day(date: datetime.date) -> str:
+    # The footer is markdown, which takes no span, so no-break spaces keep the date whole.
+    return _day(pd.Timestamp(date)).replace(" ", " ")
 
 
 def _footer(loaded: LoadResult, rins: RinResult | None = None) -> None:
     data = ""
-    if loaded.prices is not None:
+    if loaded.prices is not None and loaded.as_of is not None:
         freshness = " (may be out of date)" if loaded.is_stale else ""
-        data = f"Data to {loaded.as_of}{freshness}. "
-    if rins is not None and rins.prices is not None:
+        data = f"Data to {_footer_day(loaded.as_of)}{freshness}. "
+    if rins is not None and rins.prices is not None and rins.as_of is not None:
         saved = ", saved copy" if rins.source == "seed" else ""
-        data += f"D4 RIN prices from EPA to the week of {rins.as_of}{saved}. "
+        data += f"D4 RIN prices from EPA to the week of {_footer_day(rins.as_of)}{saved}. "
     st.caption(
         f"{data}Personal project, not affiliated with any employer. Not investment advice. "
         f"[Source code]({REPOSITORY_URL})"
@@ -582,7 +589,7 @@ def main() -> None:
     loaded = _load_prices()
     st.html(
         HERO_HTML.format(
-            data_line=html.escape(_data_line(loaded)),
+            data_line=_data_line(loaded),
             linkedin=LINKEDIN_URL,
             repository=REPOSITORY_URL,
             scope=html.escape(SCOPE),

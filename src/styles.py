@@ -8,11 +8,13 @@ __all__ = ["APP_CSS"]
 
 # Amber means "the crush margin" and nothing else: controls and the other cards stay neutral.
 # The rules target Streamlit test ids and key classes, so redo the screenshots when upgrading.
-# The top padding clears the 56 px bar Streamlit Cloud draws over the app from its parent page.
+# The top padding clears the 56 px bar Streamlit Cloud draws over the app from its parent page,
+# the bottom padding its floating badge, which covered the last card on a phone.
 # The risk strip labels keep their case: uppercase would turn σ into Σ.
+# In Streamlit 1.66 stButtonGroup is a block; the row of chips is its child div, so wrap that.
 APP_CSS: Final[str] = """<style>
 :root{--page:#0b1016;--card:#141b23;--raised:#1e2732;--line:#2a3440;--ink:#eef2f6;--mut:#a3afbd;--head:linear-gradient(115deg,#1a2430 0%,#16212c 55%,#3a2c10 100%);--crush:#c58512;--oil:#4d8fe8;--meal:#c76fae;--step:rgba(255,255,255,.07)}
-[data-testid='stMainBlockContainer']{max-width:1480px;margin:0 auto;padding:3.75rem 2rem 2rem}
+[data-testid='stMainBlockContainer']{max-width:1480px;margin:0 auto;padding:3.75rem 2rem 5rem}
 [data-testid='stHeaderActionElements']{display:none}
 :focus-visible{outline:2px solid var(--ink)!important;outline-offset:2px}
 .cm-hero{background:var(--head);border-radius:12px;padding:1.1rem 1.5rem;color:#fff;display:grid;grid-template-columns:minmax(0,13fr) minmax(0,11fr);gap:1.5rem;align-items:center}
@@ -22,6 +24,7 @@ APP_CSS: Final[str] = """<style>
 .cm-meta a{color:#fff;font-weight:500}
 .cm-meta strong{color:#fff;font-weight:600}
 .cm-scope{margin-top:.4rem;font-size:.8125rem}
+.cm-nowrap{white-space:nowrap}
 .cm-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:0;padding:0;list-style:none}
 .cm-steps a{display:block;height:100%;box-sizing:border-box;background:var(--step);border:1px solid rgba(255,255,255,.18);border-radius:10px;padding:.6rem .75rem;font-size:.8125rem;line-height:1.3;color:#e8eff7;text-decoration:none}
 .cm-steps a:hover{border-color:rgba(255,255,255,.45)}
@@ -104,7 +107,8 @@ APP_CSS: Final[str] = """<style>
  .cm-rail{grid-template-columns:1fr}
 }
 @media (max-width:640px){
- [data-testid='stMainBlockContainer']{padding:3.75rem .75rem 2rem}
+ [data-testid='stMainBlockContainer']{padding:3.75rem .75rem 5rem}
+ [class*='st-key-bar-'] [data-testid='stButtonGroup']>div{flex-wrap:wrap;row-gap:.4rem}
  .cm-hero{padding:1rem;border-radius:10px}
  .cm-hero h1{font-size:1.75rem}
  .cm-q{font-size:1rem}

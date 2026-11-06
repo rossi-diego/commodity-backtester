@@ -20,6 +20,7 @@ from src.visualization import (
     MONTHS,
     MUTED,
     OIL,
+    ROLL,
     SURFACE,
     YEAR_COLORS,
     by_month_figure,
@@ -96,7 +97,9 @@ class TestHistory:
         clean = np.asarray(_trace(fig, "Crush").y, dtype=float)
         assert np.isnan(clean[crush["flagged"].to_numpy()]).all()
         assert list(fig.layout.xaxis.range) == [crush.index[0], crush.index[-1]]
-        assert _trace(fig, "Roll or delivery").line.color == FLAT
+        roll = _trace(fig, "Roll or delivery")
+        assert roll.line.color == ROLL
+        assert roll.line.width <= 0.8
 
     def test_last_dot_is_the_last_clean_value(self, tables) -> None:
         crush, _ = tables
@@ -116,7 +119,20 @@ class TestHistory:
         assert tail.line.dash == "dash"
         first_held = gap.index[gap["rin_held"].to_numpy()][0]
         assert pd.Timestamp(tail.x[0]) < first_held
-        assert _trace(fig, "Before").line.color == FLAT
+
+    def test_reference_is_dotted_and_not_the_roll_grey(self, tables) -> None:
+        fig = _figures(tables)[1]
+        before = _trace(fig, "Before")
+        assert before.line.dash == "dot"
+        assert before.line.color != _trace(fig, "Roll or delivery").line.color
+
+    def test_tick_step_only_when_asked(self, tables) -> None:
+        crush, _ = tables
+        args = (crush["crush"], crush["flagged"])
+        fig = history_figure(*args, name="C", color=CRUSH, y_title="", y_dtick=250)
+        assert fig.layout.yaxis.dtick == 250
+        fig = history_figure(*args, name="C", color=CRUSH, y_title="")
+        assert fig.layout.yaxis.dtick is None
 
     def test_hover_carries_the_components(self, tables) -> None:
         fig = _figures(tables)[1]
@@ -130,6 +146,28 @@ class TestHistory:
             positive, crush["flagged"], name="P", color=CRUSH, y_title="", zero_labels=("a", "b")
         )
         assert not fig.layout.annotations
+
+    def test_zero_labels_sit_where_the_line_is_away_from_zero(self) -> None:
+        """On a V, 'above' goes over the trough and 'below' under an arm, off the line."""
+        dates = pd.bdate_range("2024-01-01", periods=200)
+        values = pd.Series(np.abs(np.linspace(-100.0, 100.0, 200)) - 40.0, index=dates)
+        flagged = pd.Series(False, index=dates)
+        fig = history_figure(
+            values, flagged, name="V", color=OIL, y_title="", zero_labels=("above", "below")
+        )
+        bins = np.array_split(np.arange(len(values)), 10)
+        starts = [dates[b[0]] for b in bins]
+        placed = {}
+        for note in fig.layout.annotations:
+            assert note.xref == "x"
+            assert note.bgcolor == "rgba(20,27,35,0.85)"
+            placed[note.text] = starts.index(pd.Timestamp(note.x))
+        assert placed["above"] != placed["below"]
+        for position in placed.values():
+            chunk = values.iloc[bins[position]]
+            assert not chunk.min() < 0 < chunk.max()
+        assert values.iloc[bins[placed["above"]]].max() < 0
+        assert values.iloc[bins[placed["below"]]].min() > 0
 
 
 class TestByMonth:
@@ -174,9 +212,28 @@ class TestByMonth:
         crush, _ = tables
         year = crush.index[-1].year
         with_band, _ = _by_month(crush)
-        assert f"Range of {year - 5}–{year - 1} averages" in _names(with_band)
+        assert f"Range {year - 5}–{year - 1}" in _names(with_band)
+        assert f"Avg {year - 5}–{year - 1}" in _names(with_band)
         without, _ = _by_month(crush, band=False)
         assert not any(name and name.startswith("Range") for name in _names(without))
+
+    def test_past_years_have_distinct_dashes_and_none_dotted(self, tables) -> None:
+        crush, _ = tables
+        year = crush.index[-1].year
+        fig, _ = _by_month(crush, years=[year - n for n in range(1, 6)])
+        dashes = [_trace(fig, str(year - n)).line.dash for n in range(1, 6)]
+        assert len(set(dashes)) == 5
+        assert "dot" not in dashes
+        assert _trace(fig, str(year - 1)).mode == "lines+markers"
+        assert _trace(fig, f"Avg {year - 5}–{year - 1}").line.dash == "dot"
+
+    def test_legend_sits_below_and_months_are_level(self, tables) -> None:
+        fig, _ = _by_month(tables[0])
+        assert fig.layout.legend.y < 0
+        assert fig.layout.legend.yanchor == "top"
+        assert fig.layout.xaxis.tickangle == 0
+        history = _figures(tables)[0]
+        assert history.layout.legend.y > 1
 
     def test_percent_axis(self, tables) -> None:
         fig = _figures(tables)[3]

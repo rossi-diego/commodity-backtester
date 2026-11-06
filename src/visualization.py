@@ -31,7 +31,12 @@ CRUSH: Final[str] = "#c58512"
 OIL: Final[str] = "#4d8fe8"
 MEAL: Final[str] = "#c76fae"
 FLAT: Final[str] = "#7d8796"
+# FLAT at 0.35 opacity for roll and delivery sessions, deliberately quiet: context, not a mark.
+ROLL: Final[str] = "rgba(125,135,150,0.35)"
 BAND_FILL: Final[str] = "rgba(125, 135, 150, 0.22)"
+# The fill behind the zero labels: SURFACE, nearly opaque, so the grid does not cross the text.
+LABEL_FILL: Final[str] = "rgba(20,27,35,0.85)"
+ZERO_LABEL_BINS: Final[int] = 10
 # Past years in the by-month view, by how many years back: teal is last year. Hues kept
 # clear of amber, blue and the near-white ink, which the current year draws in. Each year
 # keeps its colour whichever others are picked; six to ten years back repeat the five
@@ -61,12 +66,14 @@ def history_figure(
     held: tuple[str, pd.Series] | None = None,
     zero_labels: tuple[str, str] | None = None,
     hover: dict[str, pd.Series] | None = None,
+    y_dtick: float | None = None,
 ) -> go.Figure:
     """A metric over time, with roll and delivery sessions drawn as a thin grey line.
 
-    ``reference`` adds a thin grey comparison line. ``held`` marks the sessions whose
-    value rests on a carried-forward input; they are drawn dashed and named.
-    ``hover`` adds component levels to the tooltip of the main line.
+    ``reference`` adds a dotted comparison line in faded ink, apart from the roll grey.
+    ``held`` marks the sessions whose value rests on a carried-forward input; they are
+    drawn dashed and named. ``hover`` adds component levels to the tooltip of the main
+    line. ``y_dtick`` fixes the step between y ticks; by default Plotly picks it.
     """
     flags = flagged.reindex(values.index, fill_value=True).astype(bool)
     held_mask = (
@@ -77,8 +84,12 @@ def history_figure(
     fig = go.Figure()
     if reference is not None:
         ref_name, ref_values = reference
-        fig.add_trace(_line(values.index, ref_values.where(~flags), ref_name, FLAT, 1, False))
-    fig.add_trace(_line(values.index, values, "Roll or delivery", FLAT, 1, hover=False))
+        faded = _fade(INK_SERIES, 0.6)
+        reference_values = ref_values.where(~flags)
+        fig.add_trace(
+            _line(values.index, reference_values, ref_name, faded, 1.25, False, dash="dot")
+        )
+    fig.add_trace(_line(values.index, values, "Roll or delivery", ROLL, 0.75, hover=False))
     main = _line(values.index, values.where(~flags & ~held_mask), name, color, 1.75)
     _add_hover(main, values.index, hover, percent)
     fig.add_trace(main)
@@ -93,6 +104,8 @@ def history_figure(
     fig.update_layout(**_layout())
     fig.update_xaxes(range=[values.index[0], values.index[-1]])
     _y_axis(fig, y_title, percent)
+    if y_dtick is not None:
+        fig.update_yaxes(dtick=y_dtick)
     if zero_labels is not None:
         _zero_labels(fig, values, zero_labels)
     return fig
@@ -115,7 +128,8 @@ def by_month_figure(
     ``current`` is drawn bold in the metric colour; ``years`` are earlier years, each
     in its own colour. ``month_to_date`` is the month in progress, drawn as a hollow marker
     and not joined to the line. ``band`` shades the range of the five years before
-    ``current``, with their average dotted.
+    ``current``, with their average dotted. The legend sits under
+    the plot, where it has the full width for the picked years.
     """
     fmt = _value_format(percent)
     fig = go.Figure()
@@ -123,8 +137,10 @@ def by_month_figure(
         stats = monthly_band(means, current)
         previous = f"{current - 5}–{current - 1}"
         fig.add_trace(_band_edge(stats["low"], "Range low", legend=False))
-        fig.add_trace(_band_edge(stats["high"], f"Range of {previous} averages", fill=True))
-        fig.add_trace(_month_line(stats["average"], f"Average {previous}", FLAT, 1.25, fmt, "dot"))
+        fig.add_trace(_band_edge(stats["high"], f"Range {previous}", fill=True))
+        fig.add_trace(
+            _month_line(stats["average"], f"Avg {previous}", FLAT, 1.25, fmt, "dot", markers=False)
+        )
     # Oldest first, so the reversed legend reads from the current year back.
     past = sorted(year for year in years if year != current and year in means)
     for year in past:
@@ -160,8 +176,21 @@ def by_month_figure(
                 )
             )
     fig.update_layout(**_layout())
-    fig.update_layout(legend={"traceorder": "reversed"})
-    fig.update_xaxes(categoryorder="array", categoryarray=MONTHS, range=[-0.3, 11.3])
+    fig.update_layout(
+        legend={
+            "traceorder": "reversed",
+            "orientation": "h",
+            "y": -0.12,
+            "yanchor": "top",
+            "x": 0,
+            "xanchor": "left",
+            # A wrapped legend gives every entry the widest one's width: at 10.5 px two
+            # entries fit side by side on a phone.
+            "font": {"size": 10.5},
+        },
+        margin={"b": 56},
+    )
+    fig.update_xaxes(categoryorder="array", categoryarray=MONTHS, range=[-0.3, 11.3], tickangle=0)
     _y_axis(fig, y_title, percent)
     return fig
 
@@ -246,11 +275,12 @@ def _month_line(
     fmt: str,
     dash: str | None = None,
     counts: pd.Series | None = None,
+    markers: bool = True,
 ) -> go.Scatter:
     trace = go.Scatter(
         x=MONTHS,
         y=values.to_numpy(),
-        mode="lines+markers" if dash is None else "lines",
+        mode="lines+markers" if markers else "lines",
         name=name,
         connectgaps=False,
         hovertemplate=fmt,
@@ -277,20 +307,38 @@ def _band_edge(values: pd.Series, name: str, legend: bool = True, fill: bool = F
 
 
 def _zero_labels(fig: go.Figure, values: pd.Series, labels: tuple[str, str]) -> None:
-    """Name both sides of zero, when zero is inside the drawn range."""
-    if values.dropna().empty or not values.min() < 0 < values.max():
+    """Name both sides of zero, when zero is inside the drawn range.
+
+    The drawn values are cut into equal-count bins. "Above zero" goes where the line
+    stays lowest (the bin with the lowest high), "below zero" where it stays highest
+    (the bin with the highest low), so neither label sits on the line.
+    """
+    drawn = values.dropna()
+    if drawn.empty or not drawn.min() < 0 < drawn.max():
         return
-    for text, shift in ((labels[0], 10), (labels[1], -10)):
+    bins = [b for b in np.array_split(np.arange(len(drawn)), ZERO_LABEL_BINS) if len(b)]
+    chunks = [drawn.iloc[b] for b in bins]
+    lowest_high = min(chunks, key=lambda chunk: float(chunk.max()))
+    highest_low = max(chunks, key=lambda chunk: float(chunk.min()))
+    for text, shift, chunk in ((labels[0], 10, lowest_high), (labels[1], -10, highest_low)):
         fig.add_annotation(
-            x=0.005,
-            xref="paper",
+            x=chunk.index[0],
+            xref="x",
             y=0,
             yshift=shift,
             text=text,
             showarrow=False,
             xanchor="left",
+            bgcolor=LABEL_FILL,
+            borderpad=2,
             font={"size": 11, "color": MUTED},
         )
+
+
+def _fade(color: str, alpha: float) -> str:
+    """A ``#rrggbb`` token as ``rgba`` at ``alpha`` opacity."""
+    red, green, blue = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({red},{green},{blue},{alpha})"
 
 
 def _dot(x: Any, y: pd.Series, color: str) -> go.Scatter:

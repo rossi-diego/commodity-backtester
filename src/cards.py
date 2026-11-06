@@ -35,7 +35,10 @@ __all__ = [
 
 @dataclass(frozen=True)
 class Kpi:
-    """One headline card. ``visual`` is markup from this module; the rest is text."""
+    """One headline card. ``visual`` is markup from this module; the rest is text.
+
+    ``rank_of`` names the series the percentile ranks, when it is not the headline value.
+    """
 
     key: str
     number: int
@@ -47,6 +50,7 @@ class Kpi:
     caption: str
     visual: str = ""
     tag: str = ""
+    rank_of: str = ""
 
 
 @dataclass(frozen=True)
@@ -66,14 +70,18 @@ def ordinal(value: float) -> str:
     return f"{number}{suffix}"
 
 
-def percentile_html(percentile: float | None) -> str:
-    """A track with a marker where today ranks among clean sessions in 5 years."""
+def percentile_html(percentile: float | None, rank_of: str = "") -> str:
+    """A track with a marker where today ranks among clean sessions in 5 years.
+
+    ``rank_of`` is appended to the label, to name the series that is ranked.
+    """
     if percentile is None:
         return (
             '<div class="cm-rank" role="img" aria-label="Not enough history to rank">'
             '<div class="cm-track"></div><span>Rank n/a: under a year of history</span></div>'
         )
-    text = f"{ordinal(percentile)} percentile of 5 years"
+    text = f"{ordinal(percentile)} percentile of 5 years" + (f", {rank_of}" if rank_of else "")
+    text = html.escape(text)
     return (
         f'<div class="cm-rank" role="img" aria-label="{text}">'
         f'<div class="cm-track"><span class="cm-mark" style="left:{percentile:.1f}%"></span></div>'
@@ -105,7 +113,7 @@ def _kpi(card: Kpi) -> str:
         f'<p class="cm-value">{html.escape(card.value)}'
         f"<small>{html.escape(card.note)}</small></p>"
         f'<div class="cm-detail">{card.visual or html.escape(card.detail)}</div>'
-        f"{percentile_html(card.percentile)}"
+        f"{percentile_html(card.percentile, card.rank_of)}"
         f'<p class="cm-caption">{html.escape(card.caption)}</p></a>'
     )
 
