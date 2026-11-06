@@ -32,8 +32,11 @@ OIL: Final[str] = "#4d8fe8"
 MEAL: Final[str] = "#c76fae"
 FLAT: Final[str] = "#7d8796"
 BAND_FILL: Final[str] = "rgba(125, 135, 150, 0.22)"
-# Past years in the by-month view, most recent first: lighter means more recent.
-YEAR_GREYS: Final[tuple[str, ...]] = ("#c3cad3", "#a7b0bc", "#8f99a6", "#7a8491", "#69737f")
+# Past years in the by-month view, by how many years back: teal is last year. Hues kept
+# clear of amber, blue and the near-white ink, which the current year draws in. Each year
+# keeps its colour whichever others are picked; six to ten years back repeat the five
+# colours, dashed.
+YEAR_COLORS: Final[tuple[str, ...]] = ("#2bb39b", "#a98bf0", "#86b83a", "#e5664c", "#d86fb0")
 
 HEIGHT: Final[int] = 400
 MONTHS: Final[list[str]] = [
@@ -109,8 +112,8 @@ def by_month_figure(
 ) -> go.Figure:
     """Monthly averages of clean sessions, one line per year, on a January-to-December axis.
 
-    ``current`` is drawn bold in the metric colour; ``years`` are earlier years in
-    greys. ``month_to_date`` is the month in progress, drawn as a hollow marker
+    ``current`` is drawn bold in the metric colour; ``years`` are earlier years, each
+    in its own colour. ``month_to_date`` is the month in progress, drawn as a hollow marker
     and not joined to the line. ``band`` shades the range of the five years before
     ``current``, with their average dotted.
     """
@@ -124,9 +127,19 @@ def by_month_figure(
         fig.add_trace(_month_line(stats["average"], f"Average {previous}", FLAT, 1.25, fmt, "dot"))
     # Oldest first, so the reversed legend reads from the current year back.
     past = sorted(year for year in years if year != current and year in means)
-    for rank, year in enumerate(past):
-        grey = YEAR_GREYS[min(len(past) - 1 - rank, len(YEAR_GREYS) - 1)]
-        fig.add_trace(_month_line(means[year], str(year), grey, 1.25, fmt, counts=counts[year]))
+    for year in past:
+        back, cycle = divmod(current - year - 1, len(YEAR_COLORS))
+        fig.add_trace(
+            _month_line(
+                means[year],
+                str(year),
+                YEAR_COLORS[cycle],
+                1.5,
+                fmt,
+                "dash" if back else None,
+                counts=counts[year],
+            )
+        )
     if current in means:
         line = means[current]
         if month_to_date is not None:
