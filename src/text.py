@@ -51,8 +51,8 @@ READING_HISTORY: Final[str] = (
     "left out of every statistic."
 )
 READING_BY_MONTH: Final[str] = (
-    "Bold: this year; the hollow dot is the month to date. Greys: the years you pick, lighter "
-    "is more recent. Band: range of the five previous years."
+    "Bold: this year; the hollow dot is the month to date. Thin lines: the years you pick, "
+    "each in its own colour. Band: range of the five previous years."
 )
 READING_RIN: Final[str] = (
     "Line: oil minus heating oil and the D4 RIN value. Below zero, fuel value covers the oil. "
