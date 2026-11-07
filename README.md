@@ -88,7 +88,7 @@ On the clean changes to 2026-10-29 (685 in 5 years; data to 2026-11-05), with σ
 
 | Daily σ, last 20 changes | Daily σ, 1 year | 1-day VaR 95% | 1-day ES 97.5% | Share of ES by leg |
 |---:|---:|---:|---:|---|
-| 3.91 USD/t | 3.66 USD/t | 6,114 USD | 8,720 USD | oil 69%, meal 28%, soybeans 2% |
+| 3.91 USD/t | 3.66 USD/t | 6,114 USD | 8,720 USD | oil 69%, meal 28%, soybeans 3% |
 
 A change needs two clean ends, so 685 changes in 5 years is about 137 a year. That is why the window is 5 years: one year would leave about 3 scenarios beyond the 97.5% quantile.
 
@@ -115,7 +115,7 @@ A third line lists the three worst clean days of the 5 years, on 1,000 t: −11,
 
 ### What the risk sample leaves out
 
-In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones. They are more volatile, σ 4.49 against 3.53 USD/t, but leaving them out does not understate the VaR on this sample: on all 1,121 changes the same method gives 5,451 USD against 6,114, and the clean VaR, tested on the 436 left-out changes, has 27 exceptions (6.2%, Kupiec p 0.27). The VaR still does not model taking or making delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
+In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones. They are more volatile, σ 4.49 against 3.53 USD/t, but leaving them out does not understate the VaR on this sample: on all 1,121 changes the same method gives 5,925 USD against 6,114, and the clean VaR, tested on the 436 left-out changes, has 27 exceptions (6.2%, Kupiec p 0.27). The VaR still does not model taking or making delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
 
 ## Rolls and delivery
 

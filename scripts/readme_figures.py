@@ -31,6 +31,7 @@ from src.risk import (
     christoffersen_independence,
     clean_changes,
     kupiec_pof,
+    percent_shares,
     risk_summary,
     sample_bias,
     var_forecasts,
@@ -133,8 +134,8 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
         figures["risk_vol_ewma_usd_t"] = _rounded(risk.vol_ewma, 2)
         figures["risk_var_usd"] = _rounded(risk.var)
         figures["risk_es_usd"] = _rounded(risk.es)
-        for leg, share in risk.contributions.items():
-            figures[f"risk_share_{leg}"] = _rounded(share * 100)
+        for leg, share in percent_shares(risk.contributions).items():
+            figures[f"risk_share_{leg}"] = share
         figures["risk_es_tail_scenarios"] = risk.tail_scenarios
         for rank, (day, loss) in enumerate(risk.worst, start=1):
             figures[f"risk_worst_{rank}_date"] = day.date().isoformat()

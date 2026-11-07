@@ -23,6 +23,7 @@ from .risk import (
     VAR_LEVEL,
     Backtest,
     RiskSummary,
+    percent_shares,
 )
 from .seasonal import LOOKBACK_YEARS
 
@@ -179,9 +180,8 @@ def rail_html(what: str, reading: str, today: list[tuple[str, str]]) -> str:
     )
 
 
-def _signed_percent(share: float) -> str:
+def _signed_percent(shown: int) -> str:
     # A typographic minus, as in the page's USD values.
-    shown = round(share * 100)
     sign = "−" if shown < 0 else ("+" if shown > 0 else "")
     return f"{sign}{abs(shown)}%"
 
@@ -304,7 +304,7 @@ def risk_strip_html(summary: RiskSummary | None, copy: RiskCopy) -> str:
         '<span class="cm-legs">'
         + "".join(
             f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
-            for leg, share in summary.contributions.items()
+            for leg, share in percent_shares(summary.contributions).items()
         )
         + "</span>"
     )

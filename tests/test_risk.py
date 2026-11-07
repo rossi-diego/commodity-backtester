@@ -506,6 +506,41 @@ def test_left_out_changes_like_the_clean_ones_leave_the_var_about_the_same() -> 
     assert bias.combined_var == pytest.approx(summary.var, rel=0.15)
 
 
+def test_left_out_changes_after_the_last_clean_one_do_not_move_the_combined_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The combined VaR is measured on the clean VaR's date, not on a later left-out change."""
+    table = _delivery_table()
+    bias, summary = sample_bias(table), risk_summary(table)
+    assert bias is not None and summary is not None
+    left_out = excluded_changes(table)
+    later = pd.Series([-80.0, 90.0, -70.0], index=pd.bdate_range(summary.date, periods=4)[1:])
+    monkeypatch.setattr(engine, "excluded_changes", lambda _: pd.concat([left_out, later]))
+    moved = sample_bias(table)
+    assert moved is not None
+    assert (moved.combined_changes, moved.combined_var) == (
+        bias.combined_changes,
+        bias.combined_var,
+    )
+
+
+def test_percent_shares_add_up_to_the_rounded_total() -> None:
+    # Plain rounding gives 69 + 28 + 2 = 99; the largest remainder takes the missing point.
+    assert engine.percent_shares({"oil": 0.6944, "meal": 0.2810, "beans": 0.0246}) == {
+        "oil": 69,
+        "meal": 28,
+        "beans": 3,
+    }
+    shown = engine.percent_shares({"oil": 0.62, "meal": 0.71, "beans": -0.33})
+    assert shown == {"oil": 62, "meal": 71, "beans": -33}
+    assert engine.percent_shares({"oil": 0.002, "meal": 1.0, "beans": -0.002}) == {
+        "oil": 0,
+        "meal": 100,
+        "beans": 0,
+    }
+    assert sum(engine.percent_shares({"a": 1 / 3, "b": 1 / 3, "c": 1 / 3}).values()) == 100
+
+
 def test_the_clean_var_is_tested_on_the_left_out_changes() -> None:
     """Each left-out change takes the clean forecast for the next clean change."""
     table = _delivery_table()

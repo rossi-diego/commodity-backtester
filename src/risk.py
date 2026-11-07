@@ -20,6 +20,7 @@ book, and no square-root-of-time scaling.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -47,6 +48,7 @@ __all__ = [
     "clean_changes",
     "excluded_changes",
     "kupiec_pof",
+    "percent_shares",
     "risk_summary",
     "sample_bias",
     "var_backtest",
@@ -501,7 +503,9 @@ def _sample_bias(table: pd.DataFrame, changes: pd.DataFrame) -> SampleBias | Non
     excluded = left_out.loc[start:date]
     if len(kept) < 2 or len(excluded) < 2:
         return None
-    combined, var = _combined_var(pd.concat([changes["crush"], left_out]).sort_index())
+    # Cut at the clean date, so the combined VaR is measured on the same day as the clean one.
+    both = pd.concat([changes["crush"], left_out]).sort_index().loc[:date]
+    combined, var = _combined_var(both)
     hits = _excluded_hits(changes["crush"], excluded)
     return SampleBias(
         kept=len(kept),
@@ -525,3 +529,18 @@ def sample_bias(table: pd.DataFrame) -> SampleBias | None:
     has fewer than 2 changes.
     """
     return _sample_bias(table, clean_changes(table))
+
+
+def percent_shares(shares: Mapping[str, float]) -> dict[str, int]:
+    """Shares as whole percents that add up to their rounded total.
+
+    Largest-remainder rounding: each percent is floored, and the points still missing go
+    to the largest remainders, so ES shares that sum to 1 always show as 100%.
+    """
+    percents = {leg: share * 100 for leg, share in shares.items()}
+    shown = {leg: math.floor(p) for leg, p in percents.items()}
+    missing = round(sum(percents.values())) - sum(shown.values())
+    by_remainder = sorted(percents, key=lambda leg: percents[leg] - shown[leg], reverse=True)
+    for leg in by_remainder[:missing]:
+        shown[leg] += 1
+    return shown
