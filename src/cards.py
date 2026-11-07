@@ -191,7 +191,8 @@ def _dollars(value: float) -> str:
 
 
 def _p_value(p: float) -> str:
-    return "< 0.01" if p < 0.01 else f"{p:.2f}"
+    # A no-break space, so "< 0.01" never splits across lines.
+    return "<\N{NO-BREAK SPACE}0.01" if p < 0.01 else f"{p:.2f}"
 
 
 def backtest_verdict(test: Backtest) -> Verdict:
@@ -246,8 +247,17 @@ def _day(d: pd.Timestamp) -> str:
 
 
 def worst_line(worst: tuple[tuple[pd.Timestamp, float], ...], template: str) -> str:
-    """The largest clean losses of the window as plain text, worst first."""
-    days = ", ".join(f"{_dollars(loss)} ({_day(date)})" for date, loss in worst)
+    """The largest clean losses of the window as plain text, worst first.
+
+    Each loss and its date stay on one line: no-break spaces inside the item, and a word
+    joiner after the minus, which a browser would otherwise break after.
+    """
+    days = ", ".join(
+        f"{_dollars(loss)} ({_day(date)})".replace("−", "−\N{WORD JOINER}").replace(
+            " ", "\N{NO-BREAK SPACE}"
+        )
+        for date, loss in worst
+    )
     return template.format(years=LOOKBACK_YEARS, tonnes=NOTIONAL_TONNES, days=days)
 
 
@@ -288,10 +298,15 @@ def risk_strip_html(summary: RiskSummary | None, copy: RiskCopy) -> str:
             for verdict, text in lines
         )
         footer = tests + footer
-    # Each leg stays on one line, so a narrow cell breaks only between legs.
-    legs = " · ".join(
-        f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
-        for leg, share in summary.contributions.items()
+    # Each leg stays on one line and the legs wrap as a flex row, spaced by the CSS gap, so a
+    # narrow cell breaks only between legs and no line ends on a separator.
+    legs = (
+        '<span class="cm-legs">'
+        + "".join(
+            f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
+            for leg, share in summary.contributions.items()
+        )
+        + "</span>"
     )
     cells = [
         (

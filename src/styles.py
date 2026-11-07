@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Final
 
-__all__ = ["APP_CSS"]
+from .visualization import YEAR_COLORS
+
+__all__ = ["APP_CSS", "year_pill_css"]
 
 # Amber means "the crush margin" and nothing else: controls and the other cards stay neutral.
 # The rules target Streamlit test ids and key classes, so redo the screenshots when upgrading.
@@ -13,7 +15,9 @@ __all__ = ["APP_CSS"]
 # The risk strip labels keep their case: uppercase would turn σ into Σ.
 # In Streamlit 1.66 stButtonGroup is a block; the row of chips is its child div, so wrap that.
 # Its element container shrinks to the chips, so the view switch moves right by its margin.
-APP_CSS: Final[str] = """<style>
+# The D4 toggle's track is the near-white primary colour when on, and so is its knob (the
+# rounded div inside the track, after the hidden input), so the knob takes the page colour.
+_BASE_CSS: Final[str] = """
 :root{--page:#0b1016;--card:#141b23;--raised:#1e2732;--line:#2a3440;--ink:#eef2f6;--mut:#a3afbd;--head:linear-gradient(115deg,#1a2430 0%,#16212c 55%,#3a2c10 100%);--crush:#c58512;--oil:#4d8fe8;--meal:#c76fae;--step:rgba(255,255,255,.07)}
 [data-testid='stMainBlockContainer']{max-width:1480px;margin:0 auto;padding:3.75rem 2rem 5rem}
 [data-testid='stHeaderActionElements']{display:none}
@@ -62,6 +66,7 @@ APP_CSS: Final[str] = """<style>
 .cm-head p+p{margin-top:.3rem;font-size:.9375rem;line-height:1.4;color:var(--ink)}
 [class*='st-key-bar-']{min-height:40px;align-items:center;flex-wrap:wrap}
 .st-key-rin-gap{margin-left:auto}
+[class*='st-key-rin-'] label[data-selected]:not([data-disabled])>div:first-of-type>div{background:var(--page)}
 [class*='st-key-body-'] [data-testid='stHorizontalBlock']{align-items:stretch}
 .cm-rail{height:400px;box-sizing:border-box;display:flex;flex-direction:column;gap:.75rem;border-left:1px solid var(--line);padding-left:1rem;font-size:.8125rem;line-height:1.45;color:var(--ink);overflow:hidden}
 .cm-rail h3{font-size:.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);margin:0 0 .2rem;padding:0}
@@ -76,6 +81,7 @@ APP_CSS: Final[str] = """<style>
 .cm-risk dt{margin:0 0 .2rem;padding:0;font-size:.75rem;font-weight:500;color:var(--mut)}
 .cm-risk dd{margin:0;padding:0;font-size:.9375rem;font-weight:600;font-variant-numeric:tabular-nums}
 .cm-risk-na{margin:0;font-size:.875rem;color:var(--mut)}
+.cm-legs{display:flex;flex-wrap:wrap;gap:0 .75rem}
 .cm-leg{white-space:nowrap}
 .cm-risk-test{margin:.6rem 0 0;font-size:.8125rem;line-height:1.4;color:var(--ink)}
 .cm-chip{display:inline-block;font-size:.6875rem;font-weight:600;letter-spacing:.03em;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--line);margin-right:.4rem;vertical-align:1px}
@@ -128,4 +134,24 @@ APP_CSS: Final[str] = """<style>
  [data-testid='stPlotlyChart'] .nsewdrag{pointer-events:none}
  [data-testid='stPlotlyChart'] .modebar-container{display:none}
 }
-</style>"""
+"""
+
+
+def year_pill_css(colors: tuple[str, ...], count: int = 10) -> str:
+    """Outline each selected year pill in the colour its line takes in the by-month view.
+
+    The pills list past years newest first, so pill ``i`` is ``i`` years back and takes
+    ``colors[(i - 1) % len(colors)]``, as ``by_month_figure`` does; the repeats, six years
+    back and more, are dashed there and here.
+    """
+    rules = []
+    for i in range(1, count + 1):
+        style = "dashed" if i > len(colors) else "solid"
+        rules.append(
+            f"[class*='st-key-years-'] [role='toolbar']>button[data-selected]:nth-child({i})"
+            f"{{border:1px {style} {colors[(i - 1) % len(colors)]}}}"
+        )
+    return "\n".join(rules)
+
+
+APP_CSS: Final[str] = f"<style>\n{_BASE_CSS}{year_pill_css(YEAR_COLORS)}\n</style>"

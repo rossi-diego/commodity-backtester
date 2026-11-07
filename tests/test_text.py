@@ -52,10 +52,25 @@ def test_what_it_is_fits_the_rail(key) -> None:
 
 
 @pytest.mark.parametrize(
-    "text", [READING_HISTORY, READING_BY_MONTH + RIN_SUFFIX, READING_RIN + RIN_SUFFIX]
+    "text",
+    [*READING_HISTORY.values(), READING_BY_MONTH + RIN_SUFFIX, READING_RIN + RIN_SUFFIX],
 )
 def test_reading_fits_the_rail(text) -> None:
     assert _words(text) <= 35
+
+
+def test_history_reading_is_one_per_section() -> None:
+    assert set(READING_HISTORY) == {"crush", "share", "gap"}
+    assert len(set(READING_HISTORY.values())) == 3
+
+
+@pytest.mark.parametrize(
+    ("key", "colour"), [("crush", "Amber"), ("share", "Blue"), ("gap", "White")]
+)
+def test_history_reading_names_the_line_colour(key, colour) -> None:
+    """Amber is CRUSH, blue is OIL and white is INK_SERIES, the lines app.py draws."""
+    assert READING_HISTORY[key].startswith(f"{colour} line: ")
+    assert f"where the {colour.lower()} breaks" in READING_HISTORY[key]
 
 
 @pytest.mark.parametrize("effect", ["lower", "raise", "none"])
@@ -67,7 +82,7 @@ def test_risk_note_fits_under_the_strip(effect) -> None:
 
 def test_backtest_line_fits_under_the_strip() -> None:
     line = backtest_line(WORST_CASE, BACKTEST_LINE)
-    assert line.count("< 0.01") == 2
+    assert line.count("p\N{NO-BREAK SPACE}<\N{NO-BREAK SPACE}0.01") == 2
     assert "12,345" in line
     assert _words(line) <= 30
 
@@ -76,15 +91,17 @@ def test_es_backtest_line_fits_under_the_strip() -> None:
     line = es_backtest_line(WORST_CASE, ES_BACKTEST_LINE)
     assert "1,234 of 12,345 changes beyond the 97.5% VaR (10.0%, 2.5% expected)" in line
     assert "mean loss 12.35× ES" in line
-    assert line.endswith("Acerbi–Szekely p\N{NO-BREAK SPACE}< 0.01.")
+    assert line.endswith(
+        "Acerbi–\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}<\N{NO-BREAK SPACE}0.01."
+    )
     assert _words(line) <= 30
 
 
 def test_worst_line_fits_under_the_strip() -> None:
     days = tuple((pd.Timestamp(f"2026-12-{day}"), -123_456.0) for day in (28, 29, 30))
     line = worst_line(days, WORST_LINE)
-    assert line.count("−$123,456 (") == 3
-    assert "(30 Dec 2026)" in line
+    assert line.count("−\N{WORD JOINER}$123,456\N{NO-BREAK SPACE}(") == 3
+    assert "(30\N{NO-BREAK SPACE}Dec\N{NO-BREAK SPACE}2026)" in line
     assert _words(line) <= 30
 
 

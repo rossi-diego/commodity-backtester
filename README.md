@@ -12,7 +12,7 @@ Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/)
 
 A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third to about half of that product value, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
 
-![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR backtest line](docs/screenshot.png)
+![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR and ES backtest lines and the worst clean days](docs/screenshot.png)
 
 ---
 

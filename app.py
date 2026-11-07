@@ -400,7 +400,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
             sentence = (
                 f"{_usd(reading.value, 't')} on {_day(reading.date)}, {_rank_clause(reading)}."
             )
-            return SectionBody(sentence, fig, READING_HISTORY, today)
+            return SectionBody(sentence, fig, READING_HISTORY["crush"], today)
         fig = by_month_figure(
             means,
             counts,
@@ -451,7 +451,7 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
                 f"Oil is {reading.value:.0%} of the product value on {_day(reading.date)}, "
                 f"against a 5-year median of {median:.0%}."
             )
-            return SectionBody(sentence, fig, READING_HISTORY, today)
+            return SectionBody(sentence, fig, READING_HISTORY["share"], today)
         means, counts = monthly_means(percent, table["flagged"])
         fig = by_month_figure(
             means,
@@ -526,7 +526,7 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
                 f"The oil for 1 m³ of biodiesel costs {_usd(abs(reading.value), 'm³')} {side} "
                 f"than 1 m³ of heating oil, {_rank_clause(reading)}."
             )
-            return SectionBody(sentence, fig, READING_HISTORY, today)
+            return SectionBody(sentence, fig, READING_HISTORY["gap"], today)
         means, counts = monthly_means(table[column], flagged)
         fig = by_month_figure(
             means,

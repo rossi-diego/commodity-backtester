@@ -30,6 +30,14 @@ from src.cards import (
 from src.risk import Backtest, RiskSummary, SampleBias, kupiec_pof
 from src.text import BACKTEST_LINE, ES_BACKTEST_LINE, RISK_EFFECT, RISK_STRIP, WORST_LINE
 
+NB = "\N{NO-BREAK SPACE}"
+WJ = "\N{WORD JOINER}"
+
+
+def _plain(text: str) -> str:
+    """The text as read: no-break spaces as spaces, word joiners dropped."""
+    return text.replace(NB, " ").replace(WJ, "")
+
 
 @pytest.mark.parametrize(
     ("value", "text"),
@@ -171,14 +179,18 @@ class TestRiskStrip:
         assert "sessions" not in markup
         assert "1-day VaR 95%, 1,000 t</dt><dd>$8,123</dd>" in markup
         assert "ES 97.5%</dt><dd>$11,235</dd>" in markup
-        assert re.sub(r"<[^>]+>", "", markup).count("oil +62% · meal +71% · beans −33%") == 1
+        legs = re.search(r'<span class="cm-legs">.*?</span></dd>', markup)
+        assert legs is not None
+        assert "·" not in legs.group()
+        shown = re.sub(r"<[^>]+>", " ", legs.group()).split()
+        assert shown == ["oil", "+62%", "meal", "+71%", "beans", "−33%"]
         assert "n/a" not in markup
 
     def test_each_leg_is_kept_on_one_line(self) -> None:
         markup = risk_strip_html(self._summary(), _copy())
         expected = (
-            '<dd><span class="cm-leg">oil +62%</span> · <span class="cm-leg">meal +71%</span>'
-            ' · <span class="cm-leg">beans −33%</span></dd>'
+            '<dd><span class="cm-legs"><span class="cm-leg">oil +62%</span>'
+            '<span class="cm-leg">meal +71%</span><span class="cm-leg">beans −33%</span></span></dd>'
         )
         assert expected in markup
 
@@ -203,8 +215,8 @@ class TestRiskStrip:
 
     def test_a_rounded_zero_has_no_sign(self) -> None:
         summary = self._summary(contributions={"oil": 0.002, "meal": 1.0, "beans": -0.002})
-        text = re.sub(r"<[^>]+>", "", risk_strip_html(summary, _copy("")))
-        assert "oil 0% · meal +100% · beans 0%" in text
+        text = re.sub(r"<[^>]+>", " ", risk_strip_html(summary, _copy("")))
+        assert "oil 0%  meal +100%  beans 0%" in text
 
 
 class TestRiskNote:
@@ -233,7 +245,7 @@ class TestWorstLine:
             '<p class="cm-risk-test">Worst clean days, 5 years, 1,000 t: −$11,743 (26 Jul 2023), '
             '−$10,079 (23 Mar 2023), −$10,035 (5 Jun 2026).</p><p class="cm-risk-note">'
         )
-        assert expected in markup
+        assert expected in _plain(markup)
         assert markup.count('class="cm-risk-test"') == 3
         assert markup.index("ES backtest") < markup.index("Worst clean days")
         assert markup.count('class="cm-risk-cell"') == 4
@@ -245,7 +257,15 @@ class TestWorstLine:
 
     def test_the_line_is_built_from_the_days(self) -> None:
         line = worst_line(WORST[:1], WORST_LINE)
-        assert line == "Worst clean days, 5 years, 1,000 t: −$11,743 (26 Jul 2023)."
+        assert _plain(line) == "Worst clean days, 5 years, 1,000 t: −$11,743 (26 Jul 2023)."
+
+    def test_each_day_stays_on_one_line(self) -> None:
+        """Lines break only between the days: never after the minus or inside the date."""
+        line = worst_line(WORST, WORST_LINE)
+        items = line.split(": ", 1)[1].rstrip(".").split(", ")
+        assert len(items) == 3
+        assert items[0] == f"−{WJ}$11,743{NB}(26{NB}Jul{NB}2023)"
+        assert all(" " not in item for item in items)
 
 
 def _verdict(exceptions: int, days: int = 685, christoffersen: float = 0.5) -> Backtest:
@@ -268,7 +288,7 @@ class TestBacktestLine:
         expected = (
             '</dl><p class="cm-risk-test"><span class="cm-chip cm-chip-pass">Holds</span> '
             "Backtest, 5 years: 33 of 685 changes beyond the VaR (4.8%, 5% expected); "
-            'Kupiec p 0.83, independence p 0.29.</p><p class="cm-risk-test">'
+            f'Kupiec{NB}p{NB}0.83, independence{NB}p{NB}0.29.</p><p class="cm-risk-test">'
         )
         markup = self._strip(BACKTEST)
         assert expected in markup
@@ -306,9 +326,24 @@ class TestBacktestLine:
     def test_small_p_values_read_under_a_hundredth(self) -> None:
         test = replace(BACKTEST, exceptions=65, kupiec_p=0.0004, christoffersen_p=0.0099)
         line = backtest_line(test, BACKTEST_LINE)
-        assert line.endswith("(9.5%, 5% expected); Kupiec p < 0.01, independence p < 0.01.")
-        assert "Kupiec p &lt; 0.01, independence p &lt; 0.01." in self._strip(test)
-        assert backtest_line(replace(BACKTEST, kupiec_p=0.01), BACKTEST_LINE).count("p 0.01") == 1
+        assert line.endswith(
+            f"(9.5%, 5% expected); Kupiec{NB}p{NB}<{NB}0.01, independence{NB}p{NB}<{NB}0.01."
+        )
+        assert f"Kupiec{NB}p{NB}&lt;{NB}0.01, independence{NB}p{NB}&lt;{NB}0.01." in self._strip(
+            test
+        )
+        line = backtest_line(replace(BACKTEST, kupiec_p=0.01), BACKTEST_LINE)
+        assert line.count(f"p{NB}0.01") == 1
+
+    def test_each_p_is_tied_to_its_value(self) -> None:
+        """Each test's name, "p" and value stay together, so no strip line ends on a bare "p"."""
+        var_line = backtest_line(BACKTEST, BACKTEST_LINE)
+        es_line = es_backtest_line(BACKTEST, ES_BACKTEST_LINE)
+        assert f"Kupiec{NB}p{NB}0.83" in var_line
+        assert f"independence{NB}p{NB}0.29" in var_line
+        assert es_line.endswith(f"Acerbi–{WJ}Szekely{NB}p{NB}0.84.")
+        for line in (var_line, es_line):
+            assert not re.search(r"\sp\s", line.replace(NB, "_"))
 
     def test_no_backtest_no_line(self) -> None:
         markup = self._strip(None)
@@ -335,10 +370,10 @@ class TestEsBacktestLine:
 
     def test_the_es_line_sits_under_the_var_line(self) -> None:
         expected = (
-            'Kupiec p 0.83, independence p 0.29.</p><p class="cm-risk-test">'
+            f'Kupiec{NB}p{NB}0.83, independence{NB}p{NB}0.29.</p><p class="cm-risk-test">'
             '<span class="cm-chip cm-chip-pass">Holds</span> ES backtest, 5 years: 14 of 685 '
             "changes beyond the 97.5% VaR (2.0%, 2.5% expected); mean loss 0.97× ES; "
-            "Acerbi–Szekely p\N{NO-BREAK SPACE}0.84.</p>"
+            f"Acerbi–{WJ}Szekely{NB}p{NB}0.84.</p>"
         )
         assert expected in self._strip(BACKTEST)
 

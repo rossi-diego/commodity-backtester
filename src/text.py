@@ -45,11 +45,22 @@ WHAT: Final[dict[str, str]] = {
     ),
 }
 
-# "Reading the chart", at most 30 words each, by view.
-READING_HISTORY: Final[str] = (
-    "Coloured line: clean sessions; the dot is the latest. Thin grey: roll or delivery sessions, "
-    "left out of every statistic."
-)
+# "Reading the chart", at most 35 words each, by view. The history view names each
+# section's own line colour, as drawn in ``app.py``.
+READING_HISTORY: Final[dict[str, str]] = {
+    "crush": (
+        "Amber line: margin per tonne on clean sessions; the dot is the latest. Thin grey, where "
+        "the amber breaks: roll or delivery sessions, left out of every statistic."
+    ),
+    "share": (
+        "Blue line: oil's share of product value; above 50%, oil earns more than meal. Thin "
+        "grey, where the blue breaks: roll or delivery sessions, left out of every statistic."
+    ),
+    "gap": (
+        "White line: oil minus heating oil per m³; above zero the oil is dearer. Thin grey, "
+        "where the white breaks: roll or delivery sessions, left out of every statistic."
+    ),
+}
 READING_BY_MONTH: Final[str] = (
     "Bold: this year; hollow dot: month to date. Colours: years you pick. Band: range of "
     "five previous years. Clean sessions fall mostly late in the month."
@@ -83,15 +94,18 @@ RISK_EFFECT: Final[dict[str, str]] = {
 
 # The backtest lines in the same strip, at most 30 words each once filled by
 # ``cards.backtest_line`` and ``cards.es_backtest_line`` from a Backtest and the risk
-# constants; p-values arrive as text.
+# constants; p-values arrive as text. No-break spaces keep each test's name, its "p" and the
+# value together, and a word joiner keeps the en dash from breaking the name, so a narrow
+# strip never ends a line on a bare "p".
 BACKTEST_LINE: Final[str] = (
     "Backtest, {years} years: {exceptions} of {days:,} changes beyond the VaR ({rate:.1%}, "
-    "{expected:.0%} expected); Kupiec p {kupiec}, independence p {independence}."
+    "{expected:.0%} expected); Kupiec\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{kupiec}, "
+    "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
 )
 ES_BACKTEST_LINE: Final[str] = (
     "ES backtest, {years} years: {exceptions:,} of {days:,} changes beyond the {level:.1%} VaR "
     "({rate:.1%}, {expected:.1%} expected); mean loss {severity}; "
-    "Acerbi\N{EN DASH}Szekely p\N{NO-BREAK SPACE}{z2p}."
+    "Acerbi\N{EN DASH}\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{z2p}."
 )
 # The worst clean days, filled by ``cards.worst_line``: at most 30 words.
 WORST_LINE: Final[str] = "Worst clean days, {years} years, {tonnes:,} t: {days}."

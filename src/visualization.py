@@ -31,10 +31,13 @@ CRUSH: Final[str] = "#c58512"
 OIL: Final[str] = "#4d8fe8"
 MEAL: Final[str] = "#c76fae"
 FLAT: Final[str] = "#7d8796"
-# Cyan is the gap after the D4 RIN only, so it never reads as the oil share's blue.
-RIN: Final[str] = "#62d0e6"
-# FLAT at 0.35 opacity for roll and delivery sessions, deliberately quiet: context, not a mark.
-ROLL: Final[str] = "rgba(125,135,150,0.35)"
+# Cyan is the gap after the D4 RIN only; kept >= 15 OKLab ΔE from every YEAR_COLORS entry,
+# OIL and INK_SERIES.
+RIN: Final[str] = "#7fd6ff"
+# FLAT at 0.45 opacity for roll and delivery sessions, deliberately quiet: context, not a mark.
+# The legend shows it through a wider, opaque proxy, so the swatch is visible.
+ROLL: Final[str] = "rgba(125,135,150,0.45)"
+ROLL_NAME: Final[str] = "Roll or delivery"
 BAND_FILL: Final[str] = "rgba(125, 135, 150, 0.22)"
 # The fill behind the zero labels: SURFACE, nearly opaque, so the grid does not cross the text.
 LABEL_FILL: Final[str] = "rgba(20,27,35,0.85)"
@@ -95,6 +98,17 @@ def history_figure(
         else pd.Series(False, index=values.index)
     )
     fig = go.Figure()
+    # Legend only: the drawn roll line is too thin and faint to read as a swatch.
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            name=ROLL_NAME,
+            line={"color": FLAT, "width": 2.5},
+            hoverinfo="skip",
+        )
+    )
     if reference is not None:
         ref_name, ref_values = reference
         faded = _fade(INK_SERIES, 0.6)
@@ -102,7 +116,9 @@ def history_figure(
         fig.add_trace(
             _line(values.index, reference_values, ref_name, faded, 1.25, False, dash="dot")
         )
-    fig.add_trace(_line(values.index, values, "Roll or delivery", ROLL, 0.75, hover=False))
+    roll = _line(values.index, values, ROLL_NAME, ROLL, 1.0, hover=False)
+    roll.update(showlegend=False)
+    fig.add_trace(roll)
     main = _line(values.index, values.where(~flags & ~held_mask), name, color, 1.75)
     _add_hover(main, values.index, hover, percent)
     fig.add_trace(main)
@@ -115,7 +131,8 @@ def history_figure(
     if not clean.empty:
         fig.add_trace(_dot(clean.index[-1:], clean.iloc[-1:], color))
     fig.update_layout(**_layout())
-    fig.update_xaxes(range=[values.index[0], values.index[-1]])
+    # Explicitly dates: Plotly infers the axis type from the first trace, the empty proxy.
+    fig.update_xaxes(type="date", range=[values.index[0], values.index[-1]])
     _y_axis(fig, y_title, percent)
     if y_dtick is not None:
         fig.update_yaxes(dtick=y_dtick)
