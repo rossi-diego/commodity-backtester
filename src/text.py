@@ -62,7 +62,8 @@ READING_RIN: Final[str] = (
 # Under the crush chart's risk strip, at most 30 words.
 RISK_NOTE: Final[str] = (
     "Filtered historical simulation: 5 years of clean changes scaled to today's EWMA "
-    "volatility. Delivery and roll days, which move more, are left out. Long 1,000 t board crush."
+    "volatility. Roll and delivery days are left out; they would lower the VaR. Long 1,000 t "
+    "board crush."
 )
 
 # The backtest line in the same strip, at most 30 words once filled by
