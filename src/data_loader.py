@@ -20,6 +20,7 @@ live fallback.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import logging
 import math
@@ -270,7 +271,9 @@ def _write_cache(raw: pd.DataFrame, cache_path: Path) -> None:
         raw.to_parquet(temp_path)
         os.replace(temp_path, cache_path)
     except Exception as exc:  # noqa: BLE001
-        temp_path.unlink(missing_ok=True)
+        # On POSIX the cleanup itself fails when a parent is not a directory.
+        with contextlib.suppress(OSError):
+            temp_path.unlink(missing_ok=True)
         logger.warning("event=cache_write_failed reason=%r", str(exc))
 
 
