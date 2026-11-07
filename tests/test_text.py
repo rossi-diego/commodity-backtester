@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 import pandas as pd
 import pytest
 
-from src.cards import backtest_line, es_backtest_line, worst_line
+from src.cards import backtest_line, es_backtest_line, es_check_line, var_check_line, worst_line
 from src.risk import Backtest
 from src.text import (
     BACKTEST_LINE,
+    CHIP_LABEL,
     ES_BACKTEST_LINE,
+    ES_VERDICT,
     METHOD,
     READING_BY_MONTH,
     READING_HISTORY,
     READING_RIN,
     RISK_EFFECT,
+    RISK_METHOD,
     RISK_NOTE,
+    RISK_STRIP,
+    SCOPE,
+    VAR_VERDICT,
     WHAT,
     WORST_LINE,
 )
@@ -78,6 +85,33 @@ def test_risk_note_fits_under_the_strip(effect) -> None:
     note = RISK_NOTE.format(effect=RISK_EFFECT[effect])
     assert "{" not in note
     assert _words(note) <= 30
+
+
+@pytest.mark.parametrize("verdict", list(VAR_VERDICT))
+def test_each_var_check_fits_under_the_strip(verdict) -> None:
+    copy = replace(RISK_STRIP, var_verdict=dict.fromkeys(VAR_VERDICT, VAR_VERDICT[verdict]))
+    line = var_check_line(WORST_CASE, copy)
+    assert "1,234 of 12,345 days (10.0%)" in line
+    assert _words(line) <= 30
+
+
+@pytest.mark.parametrize("verdict", list(ES_VERDICT))
+def test_each_es_check_fits_under_the_strip(verdict) -> None:
+    copy = replace(RISK_STRIP, es_verdict=dict.fromkeys(ES_VERDICT, ES_VERDICT[verdict]))
+    assert _words(es_check_line(WORST_CASE, copy)) <= 30
+
+
+def test_every_verdict_has_words_and_a_chip() -> None:
+    assert set(VAR_VERDICT) == set(ES_VERDICT) == set(CHIP_LABEL)
+    assert all(_words(label) <= 2 for label in CHIP_LABEL.values())
+
+
+def test_the_model_line_fits_the_details() -> None:
+    assert _words(RISK_METHOD.format(date="29 Oct 2026")) <= 35
+
+
+def test_the_scope_line_is_short() -> None:
+    assert _words(SCOPE) <= 40
 
 
 def test_backtest_line_fits_under_the_strip() -> None:

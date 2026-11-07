@@ -294,6 +294,7 @@ def _section(
     title: str,
     body: Callable[[Controls], SectionBody],
     years: list[int],
+    as_of: pd.Timestamp,
     rin: bool | None = None,
     footer: str = "",
 ) -> None:
@@ -321,7 +322,8 @@ def _section(
         with chart_col:
             _chart(shown.figure, key)
         with rail_col:
-            st.html(rail_html(WHAT[key], shown.reading, shown.today))
+            title = f"Levels on {as_of.day} {as_of:%b}"
+            st.html(rail_html(WHAT[key], shown.reading, shown.today, title))
         if footer:
             st.html(footer)
 
@@ -334,12 +336,12 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
         low, high = range_52w(table["crush"], table["flagged"], reading.date)
         month = MONTHS[reading.date.month - 1]
         today = [
-            ("Board crush", f"${reading.value / BUSHELS_PER_TONNE:,.2f}/bu"),
+            ("Per bushel (CME quote)", f"${reading.value / BUSHELS_PER_TONNE:,.2f}/bu"),
             (
-                f"{month} vs {previous_years(reading.date.year)}",
+                f"Against a usual {month}",
                 "n/a" if versus is None else usd(versus[0] - versus[1], "t", signed=True),
             ),
-            ("52-week range", f"{usd(low, 't')} to {usd(high, 't')}"),
+            ("Past year, low to high", f"{usd(low, 't')} to {usd(high, 't')}"),
         ]
         if c.view == "History":
             shown = _window(table, c.window)
@@ -376,6 +378,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
         "Crush margin",
         body,
         _past_years(table.index, reading.latest_date.year),
+        reading.date,
         footer=risk_strip_html(risk, RISK_STRIP),
     )
 
@@ -423,7 +426,14 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
         sentence = month_sentence(means, reading.date, reading.latest_date, lambda v: f"{v:.1f}%")
         return SectionBody(sentence, fig, READING_BY_MONTH, today)
 
-    _section("share", 2, "Oil share", body, _past_years(table.index, reading.latest_date.year))
+    _section(
+        "share",
+        2,
+        "Oil share",
+        body,
+        _past_years(table.index, reading.latest_date.year),
+        reading.date,
+    )
 
 
 @st.fragment
@@ -512,6 +522,7 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
         "Oil cost vs diesel",
         body,
         _past_years(table.index, reading.latest_date.year),
+        reading.date,
         rin=has_rins,
     )
 

@@ -25,8 +25,9 @@ EQUIVALENCE_URL: Final[str] = (
 )
 
 SCOPE: Final[str] = (
-    "Gross margins, before plant, energy, freight and basis costs. Grey sessions are rolls or "
-    "deliveries, left out of every statistic. Of the biofuel credits, only the D4 RIN is shown."
+    "Margins are gross: before the plant's running costs, energy, freight and local price "
+    "differences. Grey days are contract rolls and deliveries, left out of every number. The D4 "
+    "RIN is the only biofuel credit counted."
 )
 
 # "What it is", at most 35 words each.
@@ -79,44 +80,81 @@ GAP_CARD: Final[dict[str, str]] = {
     "scope": "Feedstock only: before conversion costs, BTC/45Z and LCFS.",
 }
 
-# Under the crush chart's risk strip, at most 30 words with any RISK_EFFECT. The effect
-# is what the left-out changes do to the VaR, picked from the data by ``cards.risk_effect``.
+# The crush chart's risk strip, in two layers: plain lines for any reader, then the model and
+# its tests behind "Model and tests" for a risk reader. Each line holds at most 30 words once
+# filled by ``src.cards``; tests/test_text.py checks every variant.
+
+# The note under the plain lines. The effect is what the left-out changes do to the figures,
+# picked from the data by ``cards.risk_effect``.
 RISK_NOTE: Final[str] = (
-    "Filtered historical simulation: 5 years of clean changes scaled to today's EWMA "
-    "volatility. Roll and delivery days are left out; {effect}. Crusher's margin, unhedged, "
-    "1,000 t."
+    "Based on 5 years of daily moves, scaled to how much prices move now. Roll and delivery days "
+    "are left out; {effect}."
 )
 RISK_EFFECT: Final[dict[str, str]] = {
-    "lower": "they would lower the VaR",
-    "raise": "they would raise the VaR",
-    "none": "too few to test",
+    "lower": "including them would lower these figures",
+    "raise": "including them would raise these figures",
+    "none": "too few to test their effect",
 }
+# The two checks in words, each after a chip. The verdict comes from ``cards.backtest_verdict``
+# and ``cards.es_verdict``; an ES verdict is never "Over-conservative".
+VAR_CHECK: Final[str] = (
+    "Checked on the past {years} years: losses passed the 1-in-20 level on {exceptions:,} of "
+    "{days:,} days ({rate:.1%}), {verdict}."
+)
+VAR_VERDICT: Final[dict[str, str]] = {
+    "Holds": "in line with 1 day in 20",
+    "Under-covers": "more often than 1 day in 20, so the figure understates the risk",
+    "Over-conservative": "less often than 1 day in 20, so the figure overstates the risk",
+    "Clusters": "in line with 1 day in 20, but bunched together",
+}
+ES_CHECK: Final[str] = "On the worst 1 day in 40, {verdict}."
+ES_VERDICT: Final[dict[str, str]] = {
+    "Holds": "past losses were about the size of the average above",
+    "Under-covers": "past losses were larger than the average above, so it understates the risk",
+    "Over-conservative": "past losses were smaller than the average above",
+    "Clusters": "past losses were about the size of the average above, but came bunched together",
+}
+CHIP_LABEL: Final[dict[str, str]] = {
+    "Holds": "Checks out",
+    "Under-covers": "Too low",
+    "Over-conservative": "Too high",
+    "Clusters": "Bunched",
+}
+# The worst clean days, filled by ``cards.worst_line``.
+WORST_LINE: Final[str] = "Worst days in {years} years, on {tonnes:,} t: {days}."
 
-# The backtest lines in the same strip, at most 30 words each once filled by
-# ``cards.backtest_line`` and ``cards.es_backtest_line`` from a Backtest and the risk
-# constants; p-values arrive as text. No-break spaces keep each test's name, its "p" and the
-# value together, and a word joiner keeps the en dash from breaking the name, so a narrow
-# strip never ends a line on a bare "p".
+# Behind "Model and tests". p-values arrive as text. No-break spaces keep each test's name,
+# its "p" and the value together, and a word joiner keeps the en dash from breaking the name,
+# so a narrow strip never ends a line on a bare "p".
+RISK_METHOD: Final[str] = (
+    "Filtered historical simulation: each clean 1-day change in the 5 years to {date} is "
+    "divided by its EWMA volatility (λ 0.94) and scaled to today's. Long 1,000 t board crush, "
+    "unhedged."
+)
 BACKTEST_LINE: Final[str] = (
-    "Backtest, {years} years: {exceptions} of {days:,} changes beyond the VaR ({rate:.1%}, "
+    "VaR 95% backtest: {exceptions:,} of {days:,} changes beyond the VaR ({rate:.1%}, "
     "{expected:.0%} expected); Kupiec\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{kupiec}, "
     "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
 )
 ES_BACKTEST_LINE: Final[str] = (
-    "ES backtest, {years} years: {exceptions:,} of {days:,} changes beyond the {level:.1%} VaR "
+    "ES backtest: {exceptions:,} of {days:,} changes beyond the {level:.1%} VaR "
     "({rate:.1%}, {expected:.1%} expected); mean loss {severity}; "
     "Acerbi\N{EN DASH}\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{z2p}, "
     "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
 )
-# The worst clean days, filled by ``cards.worst_line``: at most 30 words.
-WORST_LINE: Final[str] = "Worst clean days, {years} years, {tonnes:,} t: {days}."
 
 RISK_STRIP: Final[RiskCopy] = RiskCopy(
     note=RISK_NOTE,
+    effects=RISK_EFFECT,
+    var_check=VAR_CHECK,
+    var_verdict=VAR_VERDICT,
+    es_check=ES_CHECK,
+    es_verdict=ES_VERDICT,
+    chips=CHIP_LABEL,
+    worst=WORST_LINE,
+    method=RISK_METHOD,
     var_test=BACKTEST_LINE,
     es_test=ES_BACKTEST_LINE,
-    worst=WORST_LINE,
-    effects=RISK_EFFECT,
 )
 
 METHOD: Final[list[MethodCard]] = [

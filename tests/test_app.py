@@ -253,7 +253,7 @@ class TestFirstLoad:
     def test_scope_names_what_is_left_out(self, app) -> None:
         app.run()
         hero = _block(app, "cm-hero")
-        for text in ("Gross margins", "D4 RIN", "basis", "rolls or deliveries"):
+        for text in ("Margins are gross", "D4 RIN", "local price", "contract rolls and deliveries"):
             assert text in hero
         assert not app.warning
 

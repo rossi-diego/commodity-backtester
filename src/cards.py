@@ -19,7 +19,6 @@ from .risk import (
     ES_LEVEL,
     MIN_CHANGES,
     NOTIONAL_TONNES,
-    SHORT_VOL_CHANGES,
     VAR_LEVEL,
     Backtest,
     RiskSummary,
@@ -38,6 +37,8 @@ __all__ = [
     "backtest_line",
     "backtest_verdict",
     "es_backtest_line",
+    "es_check_line",
+    "es_verdict",
     "kpi_row_html",
     "method_row_html",
     "ordinal",
@@ -47,6 +48,7 @@ __all__ = [
     "risk_strip_html",
     "section_head_html",
     "split_bar_html",
+    "var_check_line",
     "worst_line",
 ]
 
@@ -95,14 +97,21 @@ class MethodCard:
 class RiskCopy:
     """The risk strip's copy, from ``src.text``: templates filled by this module.
 
-    ``note`` takes an ``{effect}``, one of ``effects`` keyed lower, raise or none.
+    ``note`` takes an ``{effect}``, one of ``effects`` keyed lower, raise or none. The checks
+    take a ``{verdict}`` in words, and each chip its label, keyed by ``Verdict``.
     """
 
     note: str
+    effects: Mapping[str, str]
+    var_check: str
+    var_verdict: Mapping[str, str]
+    es_check: str
+    es_verdict: Mapping[str, str]
+    chips: Mapping[str, str]
+    worst: str
+    method: str
     var_test: str
     es_test: str
-    worst: str
-    effects: Mapping[str, str]
 
 
 def ordinal(value: float) -> str:
@@ -168,8 +177,8 @@ def section_head_html(key: str, number: int, title: str, sentence: str) -> str:
     )
 
 
-def rail_html(what: str, reading: str, today: list[tuple[str, str]]) -> str:
-    """The text beside a chart: what it is, how to read it, and today's levels."""
+def rail_html(what: str, reading: str, today: list[tuple[str, str]], title: str = "Today") -> str:
+    """The text beside a chart: what it is, how to read it, and the levels on ``title``."""
     rows = "".join(
         f"<dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd>" for label, value in today
     )
@@ -177,7 +186,7 @@ def rail_html(what: str, reading: str, today: list[tuple[str, str]]) -> str:
         '<div class="cm-rail">'
         f"<div><h3>What it is</h3><p>{html.escape(what)}</p></div>"
         f"<div><h3>Reading the chart</h3><p>{html.escape(reading)}</p></div>"
-        f'<div class="cm-today"><h3>Today</h3><dl>{rows}</dl></div></div>'
+        f'<div class="cm-today"><h3>{html.escape(title)}</h3><dl>{rows}</dl></div></div>'
     )
 
 
@@ -207,7 +216,7 @@ def backtest_verdict(test: Backtest) -> Verdict:
     return "Holds"
 
 
-def _es_verdict(test: Backtest) -> Verdict:
+def es_verdict(test: Backtest) -> Verdict:
     """What the ES backtest says, Acerbi-Szekely first, then independence, as for the VaR."""
     if test.z2_p < BACKTEST_SIGNIFICANCE:
         return "Under-covers"
@@ -216,8 +225,8 @@ def _es_verdict(test: Backtest) -> Verdict:
     return "Holds"
 
 
-def _chip(verdict: Verdict) -> str:
-    return f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{verdict}</span>'
+def _chip(verdict: Verdict, labels: Mapping[str, str]) -> str:
+    return f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{html.escape(labels[verdict])}</span>'
 
 
 def backtest_line(test: Backtest, template: str) -> str:
@@ -231,6 +240,22 @@ def backtest_line(test: Backtest, template: str) -> str:
         kupiec=_p_value(test.kupiec_p),
         independence=_p_value(test.christoffersen_p),
     )
+
+
+def var_check_line(test: Backtest, copy: RiskCopy) -> str:
+    """The VaR backtest in words, for a reader who does not know the tests."""
+    return copy.var_check.format(
+        years=LOOKBACK_YEARS,
+        exceptions=test.exceptions,
+        days=test.days,
+        rate=test.rate,
+        verdict=copy.var_verdict[backtest_verdict(test)],
+    )
+
+
+def es_check_line(test: Backtest, copy: RiskCopy) -> str:
+    """The ES backtest in words."""
+    return copy.es_check.format(verdict=copy.es_verdict[es_verdict(test)])
 
 
 def es_backtest_line(test: Backtest, template: str) -> str:
@@ -274,32 +299,38 @@ def risk_effect(summary: RiskSummary | None) -> str:
 
 
 def risk_strip_html(summary: RiskSummary | None, copy: RiskCopy) -> str:
-    """The 1-day risk of the crush in one row of four cells, under its chart.
+    """The 1-day risk of the crush under its chart, in two layers.
 
-    When the summary has a backtest, two lines under the cells state the VaR and the ES
-    test, each after a chip with its verdict; a third lists the worst clean days.
+    Four cells and plain lines for any reader: each check after a chip with its verdict, the
+    worst clean days and a note. Then the model and the test statistics behind a
+    ``<details>`` for a risk reader.
     """
     note = copy.note.format(effect=copy.effects[risk_effect(summary)])
     if summary is None:
         footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
         line = f"n/a: under {MIN_CHANGES} clean daily changes"
         return f'<div class="cm-risk"><p class="cm-risk-na">{html.escape(line)}</p>{footer}</div>'
-    as_of = f"As of {day(summary.date)}, the last clean change. "
-    footer = f'<p class="cm-risk-note">{html.escape(as_of + note)}</p>'
-    if summary.worst:
-        text = html.escape(worst_line(summary.worst, copy.worst))
-        footer = f'<p class="cm-risk-test">{text}</p>{footer}'
+    plain: list[tuple[str, str]] = []
+    details = [copy.method.format(date=day(summary.date))]
     test = summary.backtest
     if test is not None:
-        lines = (
-            (backtest_verdict(test), backtest_line(test, copy.var_test)),
-            (_es_verdict(test), es_backtest_line(test, copy.es_test)),
-        )
-        tests = "".join(
-            f'<p class="cm-risk-test">{_chip(verdict)} {html.escape(text)}</p>'
-            for verdict, text in lines
-        )
-        footer = tests + footer
+        plain += [
+            (_chip(backtest_verdict(test), copy.chips), var_check_line(test, copy)),
+            (_chip(es_verdict(test), copy.chips), es_check_line(test, copy)),
+        ]
+        details += [backtest_line(test, copy.var_test), es_backtest_line(test, copy.es_test)]
+    if summary.worst:
+        plain.append(("", worst_line(summary.worst, copy.worst)))
+    footer = "".join(
+        f'<p class="cm-risk-test">{chip + " " if chip else ""}{html.escape(text)}</p>'
+        for chip, text in plain
+    )
+    footer += f'<p class="cm-risk-note">{html.escape(note)}</p>'
+    footer += (
+        '<details class="cm-risk-more"><summary>Model and tests</summary>'
+        + "".join(f"<p>{html.escape(text)}</p>" for text in details)
+        + "</details>"
+    )
     # Each leg stays on one line and the legs wrap as a flex row, spaced by the CSS gap, so a
     # narrow cell breaks only between legs and no line ends on a separator.
     legs = (
@@ -312,12 +343,18 @@ def risk_strip_html(summary: RiskSummary | None, copy: RiskCopy) -> str:
     )
     cells = [
         (
-            f"Daily σ, last {SHORT_VOL_CHANGES} changes / 1 year",
+            "Typical daily move: recent / past year",
             html.escape(f"${summary.vol_20:,.2f}/t / ${summary.vol_1y:,.2f}/t"),
         ),
-        (f"1-day VaR {VAR_LEVEL:.0%}, {NOTIONAL_TONNES:,} t", html.escape(_dollars(summary.var))),
-        (f"ES {ES_LEVEL:.1%}", html.escape(_dollars(summary.es))),
-        ("Share of ES by leg", legs),
+        (
+            f"Loss on 1 day in {round(1 / (1 - VAR_LEVEL))}, {NOTIONAL_TONNES:,} t",
+            html.escape(_dollars(summary.var)),
+        ),
+        (
+            f"Worst 1 day in {round(1 / (1 - ES_LEVEL))}, average",
+            html.escape(_dollars(summary.es)),
+        ),
+        ("Where the worst-day loss comes from", legs),
     ]
     rows = "".join(
         f'<div class="cm-risk-cell"><dt>{html.escape(label)}</dt><dd>{value}</dd></div>'
