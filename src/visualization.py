@@ -333,7 +333,12 @@ def _zero_labels(
     if drawn.empty or not drawn.min() < 0 < drawn.max():
         return
     lines = [drawn.to_numpy(dtype=float)]
-    lines += [other.reindex(drawn.index).to_numpy(dtype=float) for other in others]
+    for other in others:
+        s = other.reindex(drawn.index)
+        # An all-NaN line has nothing to clear, and nanmax would warn on it.
+        if not s.notna().any():
+            continue
+        lines.append(s.to_numpy(dtype=float))
     span = float(np.nanmax([np.nanmax(line) for line in lines])) - float(
         np.nanmin([np.nanmin(line) for line in lines])
     )

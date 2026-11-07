@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -188,6 +189,15 @@ class TestHistory:
         reference = pd.Series(1.0, index=dates)
         fig = _zero_labelled(values, reference)
         assert [note.text for note in fig.layout.annotations] == ["below"]
+
+    def test_an_all_nan_reference_raises_no_warning(self) -> None:
+        dates = pd.bdate_range("2024-01-01", periods=200)
+        values = pd.Series(np.abs(np.linspace(-100.0, 100.0, 200)) - 40.0, index=dates)
+        reference = pd.Series(np.nan, index=dates)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            fig = _zero_labelled(values, reference)
+        assert {note.text for note in fig.layout.annotations} == {"above", "below"}
 
 
 class TestByMonth:

@@ -26,6 +26,8 @@ CACHE_START_SLACK_DAYS: Final[int] = 120
 # cache to compare with. Real columns start up to 264 days after 2000-01-01.
 COLUMN_START_SLACK_DAYS: Final[int] = 365
 
-# Days without a new close before the cache is refreshed and the data is labelled
-# as possibly out of date. Covers weekends and exchange holidays.
+# Days without a new close before the data is labelled as possibly out of date, and
+# the most a column may end before the rest of a download. Covers weekends and exchange
+# holidays. It no longer gates the refetch: the cache is refreshed once it misses the
+# last business day.
 CACHE_STALE_AFTER_DAYS: Final[int] = 5

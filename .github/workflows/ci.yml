@@ -21,7 +21,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install ruff
         run: pip install "ruff==0.17.3"  # keep in sync with requirements-dev.txt
@@ -43,7 +45,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -52,17 +56,24 @@ jobs:
         run: mypy src/ app.py scripts/
 
   # ── Job 3: Test ─────────────────────────────────────────────────────────────
+  # 3.11 is the floor in pyproject.toml; 3.14 is what Streamlit Community Cloud runs.
   test:
-    name: Test (pytest)
+    name: Test (pytest, Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -81,10 +92,13 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install pip-audit
         run: pip install "pip-audit==2.10.1"  # keep in sync with requirements-dev.txt
 
+      # requirements.txt is the full lock, so this covers every transitive package too.
       - name: Audit runtime dependencies
         run: pip-audit -r requirements.txt --strict

@@ -1,22 +1,31 @@
 """The figures quoted in README.md, computed from the same code as the page.
 
-Run ``python -m scripts.readme_figures``. Each figure is logged as one
+Run ``python -m scripts.readme_figures --snapshot``. Each figure is logged as one
 ``event=readme_figure`` line, rounded as the README quotes it, so every number in
 the README can be traced to a line of this output.
+
+``--snapshot`` reads the prices and D4 series committed in ``tests/fixtures``, with
+no network, so the README figures can be reproduced exactly. Without a flag the
+script uses the page's live data. ``--write-snapshot`` saves the live data as a new
+pair of fixtures, named by the last price date.
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import logging
+import shutil
+from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
 
+from src import config
 from src.constants import BUSHELS_PER_TONNE, GALLONS_PER_M3
-from src.data_loader import load_prices
+from src.data_loader import load_prices, read_snapshot, write_snapshot
 from src.margins import add_rins, crush_table, gap_table, rin_per_m3
-from src.rins import load_d4
+from src.rins import _read, load_d4
 from src.risk import (
     Backtest,
     _forecasts,
@@ -29,15 +38,29 @@ from src.risk import (
 from src.rolls import off_pair
 from src.seasonal import LOOKBACK_YEARS, yearly_means
 
-__all__ = ["FIRST_YEAR", "compute", "main"]
+__all__ = ["FIRST_YEAR", "SNAPSHOT_DATE", "compute", "d4_snapshot", "main", "price_snapshot"]
 
 logger = logging.getLogger(__name__)
+
+FIXTURES = config.PROJECT_ROOT / "tests" / "fixtures"
+# The last price date of the committed snapshot the README figures come from.
+SNAPSHOT_DATE = "2026-11-05"
 
 # The first full year of the biodiesel-driven oil market the README describes.
 FIRST_YEAR = 2021
 # The blenders' tax credit: 1 USD per gallon of biodiesel.
 BTC_USD_PER_GALLON = 1.0
 TOP_MOVES = 20
+
+
+def price_snapshot(as_of: str = SNAPSHOT_DATE) -> Path:
+    """The committed daily closes up to ``as_of``."""
+    return FIXTURES / f"prices_{as_of}.csv.gz"
+
+
+def d4_snapshot(as_of: str = SNAPSHOT_DATE) -> Path:
+    """The committed weekly D4 series used with the prices up to ``as_of``."""
+    return FIXTURES / f"d4_{as_of}.csv"
 
 
 def _rounded(value: float, decimals: int = 0) -> float | int | None:
@@ -82,7 +105,7 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
     moves = crush["crush"].diff().abs().dropna()
     largest = moves.nlargest(TOP_MOVES).index
     figures["top_moves_flagged"] = int(flagged.loc[largest].sum())
-    low = pd.Timestamp(crush["crush"].idxmin())  # type: ignore[arg-type]
+    low = cast(pd.Timestamp, crush["crush"].idxmin())
     figures["crush_record_low_usd_bu"] = _rounded(
         float(crush["crush"].min()) / BUSHELS_PER_TONNE, 2
     )
@@ -145,21 +168,73 @@ def _backtest_figures(changes: pd.Series, backtest: Backtest | None) -> dict[str
     }
 
 
-def main() -> None:
-    """Load the page's data and log each README figure."""
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+def _parse(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="python -m scripts.readme_figures")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--snapshot",
+        action="store_true",
+        help=f"compute from the fixtures committed in tests/fixtures (data to {SNAPSHOT_DATE})",
+    )
+    source.add_argument(
+        "--write-snapshot",
+        action="store_true",
+        help="save the live prices and the D4 cache as fixtures named by the last price date",
+    )
+    return parser.parse_args(argv)
+
+
+def _log_written(path: Path, rows: int) -> None:
+    root = config.PROJECT_ROOT
+    shown = path.relative_to(root) if path.is_relative_to(root) else path
+    logger.info("event=snapshot_written path=%s rows=%d", shown.as_posix(), rows)
+
+
+def _write_snapshots() -> None:
     loaded = load_prices()
-    if loaded.prices is None:
-        logger.error("event=readme_figures_failed reason=%s", loaded.error)
+    if loaded.prices is None or loaded.as_of is None:
+        logger.error("event=snapshot_failed reason=%s", loaded.error)
         return
-    rins = load_d4()
+    if _read(config.RIN_CACHE) is None:
+        logger.error("event=snapshot_failed reason=no D4 cache at %s", config.RIN_CACHE.name)
+        return
+    as_of = loaded.as_of.isoformat()
+    FIXTURES.mkdir(parents=True, exist_ok=True)
+    prices_path = price_snapshot(as_of)
+    write_snapshot(loaded.prices, prices_path)
+    _log_written(prices_path, len(loaded.prices))
+    # A byte copy, so the snapshot parses to the same D4 values as the cache.
+    d4_path = d4_snapshot(as_of)
+    shutil.copyfile(config.RIN_CACHE, d4_path)
+    _log_written(d4_path, len(pd.read_csv(d4_path)))
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Log each README figure, from the live data or from the committed snapshot."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    args = _parse(argv)
+    if args.write_snapshot:
+        _write_snapshots()
+        return
+    if args.snapshot:
+        prices = read_snapshot(price_snapshot())
+        d4 = _read(d4_snapshot())
+        as_of, rin_source = SNAPSHOT_DATE, "snapshot"
+    else:
+        loaded = load_prices()
+        if loaded.prices is None:
+            logger.error("event=readme_figures_failed reason=%s", loaded.error)
+            return
+        rins = load_d4()
+        prices, d4 = loaded.prices, rins.prices
+        as_of, rin_source = str(loaded.as_of), rins.source
     logger.info(
         "event=readme_figures as_of=%s rin_source=%s run=%s",
-        loaded.as_of,
-        rins.source,
+        as_of,
+        rin_source,
         datetime.date.today().isoformat(),
     )
-    for name, value in compute(loaded.prices, rins.prices).items():
+    for name, value in compute(prices, d4).items():
         logger.info("event=readme_figure name=%s value=%s", name, value)
 
 

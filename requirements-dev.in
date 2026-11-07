@@ -1,0 +1,12 @@
+# ── Development & testing dependencies ──────────────────────────────────────
+# Compile with:
+#   uv pip compile requirements-dev.in --universal --python-version 3.11 -c requirements.txt -o requirements-dev.txt
+# The constraint keeps every runtime package at its version in requirements.txt.
+-r requirements.in
+
+pytest==9.2.0
+pytest-cov==7.1.0
+ruff==0.17.3
+mypy==2.4.1
+pandas-stubs==3.0.5.260914
+pip-audit==2.10.1  # keep in sync with .github/workflows/ci.yml
