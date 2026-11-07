@@ -14,12 +14,15 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from scripts import readme_figures
 from src import config, visualization
 from src.cards import risk_strip_html
-from src.margins import RIN_TOLERANCE, crush_table
+from src.data_loader import read_snapshot
+from src.margins import RIN_TOLERANCE, break_even_d4, crush_table, gap_table
+from src.rins import RinResult
 from src.risk import risk_summary
 from src.seasonal import latest_reading
-from src.text import BACKTEST_LINE, RISK_NOTE
+from src.text import GAP_CARD, RISK_STRIP
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -139,8 +142,9 @@ class TestFirstLoad:
         week = pd.Timestamp(seed["week"].iloc[-1])
         price = seed["usd_per_rin"].iloc[-1]
         cards = _text(_kpis(app))
-        assert f"D4 ${price:.2f}, week of {week.day} {week:%b} (EPA, saved copy" in cards
-        assert "With the D4 RIN:" in cards
+        assert f"D4 week of {week.day} {week:%b} (EPA, saved copy" in cards
+        # Only the break-even detail quotes the D4 price; the caption gives its week.
+        assert cards.count(f"${price:.2f}") == int(f"latest D4 ${price:.2f} (held)." in cards)
         app.toggle(key="rin-gap").set_value(True).run()
         _no_exceptions(app)
         assert _text(_kpis(app)) == cards
@@ -154,13 +158,22 @@ class TestFirstLoad:
         assert "percentile of 5 years, before the RIN" in gap_card
         assert 'percentile of 5 years, before the RIN"' in gap_card
 
-    def test_rin_card_compares_with_heating_oil_plus_the_rin(self, app) -> None:
+    def test_rin_card_states_the_break_even_not_the_gap_after(self, app, synthetic_prices) -> None:
         """The fixture runs to today and the seed D4 stops weeks earlier, so the RIN is held."""
         app.run()
-        cards = _text(_kpis(app))
-        assert re.search(r"(less|more) than heating oil plus the RIN", cards)
-        assert "D4 price held." in cards
-        assert "BTC/45Z and LCFS" in cards
+        gap = gap_table(synthetic_prices)
+        reading = latest_reading(gap["gap"], gap["flagged"])
+        assert reading is not None
+        card = _gap_card(app)
+        if reading.value > 0:
+            be = break_even_d4(reading.value)
+            assert f"Break-even D4 RIN ${be:.2f} before conversion costs; latest D4 $" in card
+            assert "(held)." in card
+        else:
+            assert GAP_CARD["no_rin"] in card
+        assert f" · {reading.date.day} {reading.date:%b %Y}" in card
+        assert "heating oil plus the RIN" not in card
+        assert "BTC/45Z and LCFS" in card
 
     def test_rin_toggle_changes_the_chart_and_the_sentence(self, app) -> None:
         app.run()
@@ -221,7 +234,9 @@ class TestFirstLoad:
         monkeypatch.setattr(config, "RIN_SEED", tmp_path / "missing.csv")
         app.run()
         _no_exceptions(app)
-        assert "D4 RIN prices could not be loaded" in _text(_kpis(app))
+        card = _gap_card(app)
+        assert "D4 week of" not in card
+        assert card.endswith(f"{GAP_CARD['scope']} ")
         assert app.toggle(key="rin-gap").proto.disabled
 
     def test_negative_values_use_a_typographic_minus(self, app) -> None:
@@ -248,10 +263,12 @@ class TestFirstLoad:
         summary = risk_summary(crush_table(synthetic_prices))
         assert summary is not None
         strip = _block(app, 'class="cm-risk"')
-        assert strip == risk_strip_html(summary, RISK_NOTE, BACKTEST_LINE)
+        assert strip == risk_strip_html(summary, RISK_STRIP)
         assert strip.count('class="cm-risk-cell"') == 4
         assert summary.backtest is not None
-        assert strip.count('class="cm-risk-test"') == 1
+        assert summary.worst
+        # The VaR test, the ES test and the worst clean days.
+        assert strip.count('class="cm-risk-test"') == 3
         assert strip.index('class="cm-risk-test"') > strip.index("</dl>")
         assert strip.index('class="cm-risk-test"') < strip.index('class="cm-risk-note"')
         assert f"${summary.var:,.0f}" in strip
@@ -264,6 +281,71 @@ class TestFirstLoad:
         assert (
             "Personal project, not affiliated with any employer. Not investment advice." in footer
         )
+
+
+def _gap_card(at: AppTest) -> str:
+    return _text(_kpis(at).split('cm-kpi-gap"', 1)[1])
+
+
+class TestGapCard:
+    """Card 3 on the committed snapshot, and its branches without a RIN."""
+
+    @pytest.fixture()
+    def snapshot_app(self, tmp_path, monkeypatch):
+        prices = read_snapshot(readme_figures.price_snapshot())
+        monkeypatch.setattr(config, "RIN_SEED", readme_figures.d4_snapshot())
+        at = _cached_app(monkeypatch, tmp_path, prices)
+        # The snapshot ends on its own date: a later run falls back to it as a stale cache.
+        with patch("src.data_loader.yf.download", side_effect=RuntimeError("offline")):
+            yield at
+        st.cache_data.clear()
+
+    def test_break_even_on_the_snapshot(self, snapshot_app) -> None:
+        snapshot_app.run()
+        _no_exceptions(snapshot_app)
+        card = _gap_card(snapshot_app)
+        assert "+$85/m³" in card
+        assert "oil dearer · +$0.32/gal · 5 Nov 2026" in card
+        assert "Break-even D4 RIN $0.22 before conversion costs; latest D4 $2.09 (held)." in card
+        assert card.count("$2.09") == 1
+        assert card.count("/m³") == 1
+        assert "D4 week of 21 Sep (EPA, saved copy, 6 weeks old). Feedstock only:" in card
+
+    def test_note_date_never_breaks(self, snapshot_app) -> None:
+        snapshot_app.run()
+        gap_card = _kpis(snapshot_app).split("cm-kpi-gap", 1)[1]
+        note = re.search(r'class="cm-value">[^<]*<small>([^<]*)</small>', gap_card)
+        assert note is not None
+        day = note.group(1).rsplit(" · ", 1)[1]
+        assert day == "5 Nov 2026"
+        assert " " not in day
+
+    def test_oil_cheaper_than_heating_oil_needs_no_rin(self, tmp_path, monkeypatch) -> None:
+        prices = read_snapshot(readme_figures.price_snapshot())
+        prices["Heating Oil"] *= 3
+        monkeypatch.setattr(config, "RIN_SEED", readme_figures.d4_snapshot())
+        at = _cached_app(monkeypatch, tmp_path, prices)
+        with patch("src.data_loader.yf.download", side_effect=RuntimeError("offline")):
+            at.run()
+        _no_exceptions(at)
+        card = _gap_card(at)
+        assert "oil cheaper · −$" in card
+        assert "Heating oil alone covers the oil: no RIN needed before conversion costs." in card
+        assert "Break-even" not in card
+        st.cache_data.clear()
+
+    def test_without_d4_the_caption_is_the_feedstock_sentence(self, snapshot_app) -> None:
+        with patch("src.rins.load_d4", return_value=RinResult(None, "none", "offline")):
+            snapshot_app.run()
+        _no_exceptions(snapshot_app)
+        card = _gap_card(snapshot_app)
+        assert "D4 RIN prices could not be loaded." in card
+        assert "$2.09" not in card
+        caption = re.search(
+            r'class="cm-caption">([^<]*)<', _kpis(snapshot_app).split("cm-kpi-gap", 1)[1]
+        )
+        assert caption is not None
+        assert caption.group(1) == GAP_CARD["scope"]
 
 
 class TestControls:
@@ -491,6 +573,8 @@ class TestSource:
             *(p.read_text(encoding="utf-8") for p in (ROOT / "src").glob("*.py")),
         ]
         for text in texts:
+            # Heating oil alone may cover the oil, which is arithmetic, not a RIN verdict.
+            text = text.replace("Heating oil alone covers the oil", "")
             for phrase in ("covers the oil", "closes the gap", "as the theory"):
                 assert phrase not in text
 

@@ -20,12 +20,16 @@ live fallback.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import logging
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 from pandas.tseries.offsets import BDay
@@ -45,6 +49,12 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 MIN_ROW_SHARE_OF_CACHE = 0.9
+# The largest absolute daily log return a column may have. The largest since 2000 is
+# 0.25 (heating oil 2022-03-09); a cents/dollars slip is 4.6.
+MAX_ABS_LOG_RETURN: Final = math.log(2)
+# How far the median ratio of new to cached prices, on the dates both have, may move
+# from 1 before the column counts as rescaled.
+MAX_CACHE_RATIO_DRIFT: Final = 0.05
 
 
 class DataLoaderError(Exception):
@@ -66,7 +76,7 @@ def load_prices() -> LoadResult:
     try:
         prices, _ = yahoo_quotes()
     except DataLoaderError as exc:
-        logger.error("event=data_load_failed reason=%s", exc)
+        logger.error("event=data_load_failed reason=%r", str(exc))
         return LoadResult(prices=None, as_of=None, is_stale=False, error=str(exc))
 
     as_of = prices.index.max().date()
@@ -153,7 +163,7 @@ def yahoo_quotes(
     problems = _response_problems(raw, cached, req_start)
     if problems:
         summary = "; ".join(problems)
-        logger.warning("event=cache_rejected problems=%s", summary)
+        logger.warning("event=cache_rejected problems=%r", summary)
         return _fall_back(cached, f"Yahoo Finance response rejected: {summary}")
 
     _write_cache(raw, cache_path)
@@ -170,7 +180,7 @@ def _read_cache(cache_path: Path) -> pd.DataFrame | None:
         cached = pd.read_parquet(cache_path)
         cached.index = pd.to_datetime(cached.index)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("event=cache_unreadable reason=%s", exc)
+        logger.warning("event=cache_unreadable reason=%r", str(exc))
         return None
     return None if cached.empty else cached
 
@@ -183,8 +193,12 @@ def _response_problems(
     """List the reasons a downloaded frame must not replace the cache.
 
     Every tracked column needs at least one value and must end with the rest of the
-    response, within ``CACHE_STALE_AFTER_DAYS``. With a cache, each column must
-    keep at least 90% of its cached observations and must not end earlier. A
+    response, within ``CACHE_STALE_AFTER_DAYS``. Its values must be finite and
+    positive, and no daily log return may exceed ``MAX_ABS_LOG_RETURN`` in size, so
+    a cents/dollars slip on one row is caught. With a cache, each column must keep
+    at least 90% of its cached observations, must not end earlier, and on the dates
+    both have the median ratio of new to cached prices must stay within
+    ``MAX_CACHE_RATIO_DRIFT`` of 1, so a column rescaled as a whole is caught too. A
     column that is missing or empty in the cache imposes no constraint, so a good
     response can repair an imperfect cache. Without a cache, each column must
     start within ``COLUMN_START_SLACK_DAYS`` of the requested start.
@@ -201,6 +215,12 @@ def _response_problems(
         if new[-1] < raw.index.max() - pd.Timedelta(days=config.CACHE_STALE_AFTER_DAYS):
             problems.append(f"{column} ends before the rest of the response")
 
+        values = raw[column].dropna().astype("float64")
+        if not (np.isfinite(values) & (values > 0)).all():
+            problems.append(f"{column} has non-positive or non-finite prices")
+        elif np.abs(np.diff(np.log(values.to_numpy()))).max(initial=0.0) > MAX_ABS_LOG_RETURN:
+            problems.append(f"{column} has a unit jump")
+
         if cached is None:
             if new[0] > latest_start:
                 problems.append(f"{column} starts after {latest_start.date()}")
@@ -214,6 +234,11 @@ def _response_problems(
             problems.append(f"{column} has too few rows")
         if new[-1] < old[-1]:
             problems.append(f"{column} ends before the cache")
+        shared = values.index.intersection(old)
+        if not shared.empty:
+            ratio = values.loc[shared] / cached.loc[shared, column].astype("float64")
+            if abs(float(ratio.median()) - 1) > MAX_CACHE_RATIO_DRIFT:
+                problems.append(f"{column} is rescaled against the cache")
 
     return problems
 
@@ -230,7 +255,7 @@ def _fall_back(cached: pd.DataFrame | None, reason: str) -> tuple[pd.DataFrame, 
     if cached is None:
         raise DataLoaderError(reason)
     logger.warning(
-        "event=data_load source=stale_cache rows=%d as_of=%s reason=%s",
+        "event=data_load source=stale_cache rows=%d as_of=%s reason=%r",
         len(cached),
         cached.index.max().date(),
         reason,
@@ -242,11 +267,14 @@ def _write_cache(raw: pd.DataFrame, cache_path: Path) -> None:
     """Replace the cache atomically. A failed write leaves the original file untouched."""
     temp_path = cache_path.with_suffix(".tmp")
     try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         raw.to_parquet(temp_path)
         os.replace(temp_path, cache_path)
     except Exception as exc:  # noqa: BLE001
-        temp_path.unlink(missing_ok=True)
-        logger.warning("event=cache_write_failed reason=%s", exc)
+        # On POSIX the cleanup itself fails when a parent is not a directory.
+        with contextlib.suppress(OSError):
+            temp_path.unlink(missing_ok=True)
+        logger.warning("event=cache_write_failed reason=%r", str(exc))
 
 
 # gzip stores a timestamp in its header; a fixed one makes the same data give the same bytes.

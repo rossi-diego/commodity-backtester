@@ -25,6 +25,7 @@ __all__ = [
     "GAP_COLUMNS",
     "RIN_TOLERANCE",
     "add_rins",
+    "break_even_d4",
     "crush_table",
     "gap_table",
     "per_gallon",
@@ -92,6 +93,15 @@ def gap_table(prices: pd.DataFrame) -> pd.DataFrame:
 def rin_per_m3(usd_per_rin: float | pd.Series) -> float | pd.Series:
     """Value of the D4 RINs a m3 of biodiesel generates: 1.5 RINs per gallon."""
     return RINS_PER_GALLON_BIODIESEL * GALLONS_PER_M3 * usd_per_rin
+
+
+def break_even_d4(gap_usd_per_m3: float) -> float:
+    """D4 price in USD/RIN at which the RIN value equals the feedstock gap, before conversion
+    costs; negative when oil is cheaper than heating oil.
+
+    The inverse of ``rin_per_m3``.
+    """
+    return gap_usd_per_m3 / (RINS_PER_GALLON_BIODIESEL * GALLONS_PER_M3)
 
 
 def per_gallon(usd_per_m3: float) -> float:

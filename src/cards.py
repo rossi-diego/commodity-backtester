@@ -8,8 +8,12 @@ through ``html.escape``; markup arguments come only from this module.
 from __future__ import annotations
 
 import html
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
+
+import pandas as pd
 
 from .risk import (
     ES_LEVEL,
@@ -19,27 +23,42 @@ from .risk import (
     VAR_LEVEL,
     Backtest,
     RiskSummary,
+    percent_shares,
 )
 from .seasonal import LOOKBACK_YEARS
 
 __all__ = [
     "BACKTEST_SIGNIFICANCE",
+    "VERDICT_CLASS",
     "Kpi",
     "MethodCard",
-    "backtest_fails",
+    "RiskCopy",
+    "Verdict",
     "backtest_line",
+    "backtest_verdict",
+    "es_backtest_line",
     "kpi_row_html",
     "method_row_html",
     "ordinal",
     "percentile_html",
     "rail_html",
+    "risk_effect",
     "risk_strip_html",
     "section_head_html",
     "split_bar_html",
+    "worst_line",
 ]
 
-# A p-value under this rejects the VaR: too many exceptions, or exceptions that cluster.
+# A p-value under this rejects the VaR: too many or too few exceptions, or clusters.
 BACKTEST_SIGNIFICANCE: Final = 0.05
+
+Verdict = Literal["Holds", "Under-covers", "Over-conservative", "Clusters"]
+VERDICT_CLASS: Final[dict[Verdict, str]] = {
+    "Holds": "cm-chip-pass",
+    "Under-covers": "cm-chip-fail",
+    "Clusters": "cm-chip-fail",
+    "Over-conservative": "cm-chip-over",
+}
 
 
 @dataclass(frozen=True)
@@ -69,6 +88,20 @@ class MethodCard:
     title: str
     entries: tuple[tuple[str, str], ...]
     closing: str
+
+
+@dataclass(frozen=True)
+class RiskCopy:
+    """The risk strip's copy, from ``src.text``: templates filled by this module.
+
+    ``note`` takes an ``{effect}``, one of ``effects`` keyed lower, raise or none.
+    """
+
+    note: str
+    var_test: str
+    es_test: str
+    worst: str
+    effects: Mapping[str, str]
 
 
 def ordinal(value: float) -> str:
@@ -147,9 +180,8 @@ def rail_html(what: str, reading: str, today: list[tuple[str, str]]) -> str:
     )
 
 
-def _signed_percent(share: float) -> str:
+def _signed_percent(shown: int) -> str:
     # A typographic minus, as in the page's USD values.
-    shown = round(share * 100)
     sign = "−" if shown < 0 else ("+" if shown > 0 else "")
     return f"{sign}{abs(shown)}%"
 
@@ -159,12 +191,32 @@ def _dollars(value: float) -> str:
 
 
 def _p_value(p: float) -> str:
-    return "< 0.01" if p < 0.01 else f"{p:.2f}"
+    # A no-break space, so "< 0.01" never splits across lines.
+    return "<\N{NO-BREAK SPACE}0.01" if p < 0.01 else f"{p:.2f}"
 
 
-def backtest_fails(test: Backtest) -> bool:
-    """Either test rejects the VaR at the 5% level."""
-    return min(test.kupiec_p, test.christoffersen_p) < BACKTEST_SIGNIFICANCE
+def backtest_verdict(test: Backtest) -> Verdict:
+    """What the VaR backtest says, Kupiec's coverage first, then independence."""
+    if test.kupiec_p < BACKTEST_SIGNIFICANCE and test.rate > 1 - VAR_LEVEL:
+        return "Under-covers"
+    if test.kupiec_p < BACKTEST_SIGNIFICANCE and test.rate < 1 - VAR_LEVEL:
+        return "Over-conservative"
+    if test.christoffersen_p < BACKTEST_SIGNIFICANCE:
+        return "Clusters"
+    return "Holds"
+
+
+def _es_verdict(test: Backtest) -> Verdict:
+    """What the ES backtest says, Acerbi-Szekely first, then independence, as for the VaR."""
+    if test.z2_p < BACKTEST_SIGNIFICANCE:
+        return "Under-covers"
+    if test.es_christoffersen_p < BACKTEST_SIGNIFICANCE:
+        return "Clusters"
+    return "Holds"
+
+
+def _chip(verdict: Verdict) -> str:
+    return f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{verdict}</span>'
 
 
 def backtest_line(test: Backtest, template: str) -> str:
@@ -180,32 +232,87 @@ def backtest_line(test: Backtest, template: str) -> str:
     )
 
 
-def risk_strip_html(summary: RiskSummary | None, note: str, test_template: str) -> str:
+def es_backtest_line(test: Backtest, template: str) -> str:
+    """The ES backtest sentence as plain text, filled only from ``test`` and the constants."""
+    return template.format(
+        years=LOOKBACK_YEARS,
+        exceptions=test.es_exceptions,
+        days=test.days,
+        level=ES_LEVEL,
+        rate=test.es_rate,
+        expected=1 - ES_LEVEL,
+        severity="n/a" if math.isnan(test.es_ratio) else f"{test.es_ratio:.2f}× ES",
+        z2p=_p_value(test.z2_p),
+        independence=_p_value(test.es_christoffersen_p),
+    )
+
+
+def _day(d: pd.Timestamp) -> str:
+    # d.day, not %-d, which is not portable to Windows.
+    return f"{d.day} {d:%b %Y}"
+
+
+def worst_line(worst: tuple[tuple[pd.Timestamp, float], ...], template: str) -> str:
+    """The largest clean losses of the window as plain text, worst first.
+
+    Each loss and its date stay on one line: no-break spaces inside the item, and a word
+    joiner after the minus, which a browser would otherwise break after.
+    """
+    days = ", ".join(
+        f"{_dollars(loss)} ({_day(date)})".replace("−", "−\N{WORD JOINER}").replace(
+            " ", "\N{NO-BREAK SPACE}"
+        )
+        for date, loss in worst
+    )
+    return template.format(years=LOOKBACK_YEARS, tonnes=NOTIONAL_TONNES, days=days)
+
+
+def risk_effect(summary: RiskSummary | None) -> str:
+    """Whether the left-out roll and delivery changes would lower or raise the VaR."""
+    if summary is None or summary.bias is None:
+        return "none"
+    if summary.bias.combined_var < summary.var:
+        return "lower"
+    # A NaN combined VaR, from too few changes, compares false both ways.
+    return "raise" if summary.bias.combined_var > summary.var else "none"
+
+
+def risk_strip_html(summary: RiskSummary | None, copy: RiskCopy) -> str:
     """The 1-day risk of the crush in one row of four cells, under its chart.
 
-    When the summary has a backtest, a line under the cells states it, after a chip that
-    says whether the VaR holds; ``test_template`` is its copy, from ``src.text``.
+    When the summary has a backtest, two lines under the cells state the VaR and the ES
+    test, each after a chip with its verdict; a third lists the worst clean days.
     """
+    note = copy.note.format(effect=copy.effects[risk_effect(summary)])
     if summary is None:
         footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
         line = f"n/a: under {MIN_CHANGES} clean daily changes"
         return f'<div class="cm-risk"><p class="cm-risk-na">{html.escape(line)}</p>{footer}</div>'
-    d = summary.date
-    # d.day, not %-d, which is not portable to Windows.
-    as_of = f"As of {d.day} {d:%b %Y}, the last clean change. "
+    as_of = f"As of {_day(summary.date)}, the last clean change. "
     footer = f'<p class="cm-risk-note">{html.escape(as_of + note)}</p>'
-    if summary.backtest is not None:
-        fails = backtest_fails(summary.backtest)
-        chip = (
-            f'<span class="cm-chip cm-chip-{"fail" if fails else "pass"}">'
-            f"{'Under-covers' if fails else 'Holds'}</span>"
+    if summary.worst:
+        text = html.escape(worst_line(summary.worst, copy.worst))
+        footer = f'<p class="cm-risk-test">{text}</p>{footer}'
+    test = summary.backtest
+    if test is not None:
+        lines = (
+            (backtest_verdict(test), backtest_line(test, copy.var_test)),
+            (_es_verdict(test), es_backtest_line(test, copy.es_test)),
         )
-        text = html.escape(backtest_line(summary.backtest, test_template))
-        footer = f'<p class="cm-risk-test">{chip} {text}</p>{footer}'
-    # Each leg stays on one line, so a narrow cell breaks only between legs.
-    legs = " · ".join(
-        f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
-        for leg, share in summary.contributions.items()
+        tests = "".join(
+            f'<p class="cm-risk-test">{_chip(verdict)} {html.escape(text)}</p>'
+            for verdict, text in lines
+        )
+        footer = tests + footer
+    # Each leg stays on one line and the legs wrap as a flex row, spaced by the CSS gap, so a
+    # narrow cell breaks only between legs and no line ends on a separator.
+    legs = (
+        '<span class="cm-legs">'
+        + "".join(
+            f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
+            for leg, share in percent_shares(summary.contributions).items()
+        )
+        + "</span>"
     )
     cells = [
         (
@@ -214,7 +321,7 @@ def risk_strip_html(summary: RiskSummary | None, note: str, test_template: str) 
         ),
         (f"1-day VaR {VAR_LEVEL:.0%}, {NOTIONAL_TONNES:,} t", html.escape(_dollars(summary.var))),
         (f"ES {ES_LEVEL:.1%}", html.escape(_dollars(summary.es))),
-        ("Risk by leg", legs),
+        ("Share of ES by leg", legs),
     ]
     rows = "".join(
         f'<div class="cm-risk-cell"><dt>{html.escape(label)}</dt><dd>{value}</dd></div>'

@@ -27,7 +27,7 @@ import websockets
 
 from . import config
 
-__all__ = ["RinResult", "load_d4", "parse_rows"]
+__all__ = ["RinResult", "load_d4", "parse_rows", "read_d4_csv"]
 
 logger = logging.getLogger(__name__)
 
@@ -66,21 +66,21 @@ class RinResult:
 
 def load_d4() -> RinResult:
     """Return the weekly D4 series without raising."""
-    cached = _read(config.RIN_CACHE)
+    cached = read_d4_csv(config.RIN_CACHE)
     if cached is not None and _age_seconds(config.RIN_CACHE) < CACHE_MAX_AGE_SECONDS:
         return RinResult(cached, "cache")
 
-    reference = cached if cached is not None else _read(config.RIN_SEED)
+    reference = cached if cached is not None else read_d4_csv(config.RIN_SEED)
     try:
         fresh = parse_rows(_fetch_rows())
         problems = _problems(fresh, reference)
         if problems:
             raise ValueError("; ".join(problems))
     except Exception as exc:  # noqa: BLE001
-        logger.warning("event=rin_load_failed reason=%s", exc)
+        logger.warning("event=rin_load_failed reason=%r", str(exc))
         if cached is not None:
             return RinResult(cached, "cache", str(exc))
-        seed = _read(config.RIN_SEED)
+        seed = read_d4_csv(config.RIN_SEED)
         return RinResult(seed, "seed" if seed is not None else "none", str(exc))
 
     _write(fresh, config.RIN_CACHE)
@@ -159,7 +159,12 @@ class _Engine:
                 return result
 
 
-def _read(path: Path) -> pd.Series | None:
+def read_d4_csv(path: Path) -> pd.Series | None:
+    """Read a weekly D4 CSV (``week``, ``usd_per_rin``) as a sorted series in USD per RIN.
+
+    Returns None, and logs why, when the file is missing, unreadable, has a week that
+    is not a date or holds no price.
+    """
     if not path.exists():
         return None
     try:
@@ -171,7 +176,7 @@ def _read(path: Path) -> pd.Series | None:
         if series.empty:
             raise ValueError("no prices")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("event=rin_unreadable path=%s reason=%s", path.name, exc)
+        logger.warning("event=rin_unreadable path=%r reason=%r", path.name, str(exc))
         return None
     return series
 
@@ -179,11 +184,12 @@ def _read(path: Path) -> pd.Series | None:
 def _write(series: pd.Series, path: Path) -> None:
     temp = path.with_suffix(".tmp")
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         series.rename("usd_per_rin").to_frame().to_csv(temp, date_format="%Y-%m-%d")
         os.replace(temp, path)
     except Exception as exc:  # noqa: BLE001
         temp.unlink(missing_ok=True)
-        logger.warning("event=rin_cache_write_failed reason=%s", exc)
+        logger.warning("event=rin_cache_write_failed reason=%r", str(exc))
 
 
 def _age_seconds(path: Path) -> float:

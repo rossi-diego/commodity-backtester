@@ -6,14 +6,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src import risk as engine
 from src.margins import crush_table
 from src.risk import (
+    ES_LEVEL,
     EWMA_LAMBDA,
     EWMA_SEED,
     MIN_CHANGES,
     NOTIONAL_TONNES,
-    _ewma_variance,
-    _forecasts,
+    WORST_DAYS,
     christoffersen_independence,
     clean_changes,
     excluded_changes,
@@ -21,6 +22,8 @@ from src.risk import (
     risk_summary,
     sample_bias,
     var_backtest,
+    var_forecasts,
+    worst_changes,
 )
 from src.rolls import (
     BEAN_MONTHS,
@@ -190,7 +193,30 @@ def test_contributions_sum_to_one(synthetic_prices) -> None:
     summary = risk_summary(crush_table(synthetic_prices))
     assert summary is not None
     assert list(summary.contributions) == ["oil", "meal", "beans"]
-    assert sum(summary.contributions.values()) == pytest.approx(1.0, abs=1e-9)
+    assert sum(summary.contributions.values()) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_scenario_legs_add_up_to_the_crush_scenarios(synthetic_prices) -> None:
+    changes = clean_changes(crush_table(synthetic_prices))
+    legs, sigma_next = engine._scenarios(changes)
+    _, z = engine._standardised(changes["crush"].to_numpy(dtype=float))
+    start = engine._window_start(pd.DatetimeIndex(changes.index), changes.index[-1])
+    assert list(legs.columns) == ["oil", "meal", "beans"]
+    assert np.allclose(legs.sum(axis=1).to_numpy(), sigma_next * z[start:])
+
+
+def test_each_share_of_the_es_is_its_leg_in_the_tail(synthetic_prices) -> None:
+    """Share times ES is minus the leg's mean over the scenarios behind the ES."""
+    table = crush_table(synthetic_prices)
+    summary = risk_summary(table)
+    assert summary is not None
+    legs, _ = engine._scenarios(clean_changes(table))
+    crush = legs.sum(axis=1)
+    tail = crush <= np.quantile(crush, 1 - ES_LEVEL)
+    assert int(tail.sum()) == summary.tail_scenarios
+    assert summary.es == pytest.approx(-NOTIONAL_TONNES * crush[tail].mean())
+    for leg, share in summary.contributions.items():
+        assert share * summary.es / NOTIONAL_TONNES == pytest.approx(-legs[leg][tail].mean())
 
 
 def test_a_constant_beans_leg_carries_no_risk() -> None:
@@ -261,7 +287,7 @@ def _series(values: np.ndarray, start: str = "2010-01-04") -> pd.Series:
 def test_ewma_of_a_constant_size_is_that_size() -> None:
     c = 2.5
     x = c * np.where(np.arange(200) % 2 == 0, 1.0, -1.0)
-    s2 = _ewma_variance(x)
+    s2 = engine._ewma_variance(x)
     assert len(s2) == len(x) + 1
     assert np.isnan(s2[:EWMA_SEED]).all()
     assert np.sqrt(s2[EWMA_SEED:]) == pytest.approx(c)
@@ -271,12 +297,14 @@ def test_ewma_uses_only_earlier_changes() -> None:
     x = np.random.default_rng(4).normal(0, 1, 100)
     shocked = x.copy()
     shocked[60] = 50.0
-    assert np.array_equal(_ewma_variance(x)[:61], _ewma_variance(shocked)[:61], equal_nan=True)
-    assert _ewma_variance(shocked)[61] > _ewma_variance(x)[61]
+    assert np.array_equal(
+        engine._ewma_variance(x)[:61], engine._ewma_variance(shocked)[:61], equal_nan=True
+    )
+    assert engine._ewma_variance(shocked)[61] > engine._ewma_variance(x)[61]
 
 
 def test_ewma_under_the_seed_is_all_nan() -> None:
-    assert np.isnan(_ewma_variance(np.ones(EWMA_SEED - 1))).all()
+    assert np.isnan(engine._ewma_variance(np.ones(EWMA_SEED - 1))).all()
 
 
 def test_kupiec_pof() -> None:
@@ -323,15 +351,64 @@ def test_scaling_the_changes_scales_var_and_es_only() -> None:
 
 def test_no_forecast_sees_its_own_change_or_a_later_one() -> None:
     x = np.random.default_rng(9).normal(0, 1, 700)
-    base = _forecasts(_series(x))
+    base = var_forecasts(_series(x))
     changed = x.copy()
     changed[-1] = -40.0
-    after = _forecasts(_series(changed))
+    after = var_forecasts(_series(changed))
     assert len(base) > 100
+    assert list(base.columns) == ["fhs", "hs", "change", "var975", "es975"]
     pd.testing.assert_frame_equal(after.iloc[:-1], base.iloc[:-1])
-    assert after.iloc[-1]["fhs"] == base.iloc[-1]["fhs"]
-    assert after.iloc[-1]["hs"] == base.iloc[-1]["hs"]
+    for column in ("fhs", "hs", "var975", "es975"):
+        assert after.iloc[-1][column] == base.iloc[-1][column], column
     assert after.iloc[-1]["change"] == -40.0
+    assert (base["es975"] >= base["var975"]).all()
+    assert (base["var975"] >= base["fhs"]).all()
+
+
+def test_z2_by_hand() -> None:
+    change = np.array([-3.0, 1.0, -1.0, -5.0])
+    var, es = np.full(4, 2.0), np.full(4, 4.0)
+    # Two exceptions, -3 and -5: (-3 - 5) / (4 days x 2.5% x 4) + 1.
+    assert engine._z2(change, var, es) == pytest.approx(-19.0)
+    assert engine._z2(np.array([1.0, -1.0]), np.full(2, 2.0), np.full(2, 3.0)) == 1.0
+
+
+def test_es_backtest_matches_its_forecasts() -> None:
+    x = _series(np.random.default_rng(13).standard_t(4, 1600))
+    forecasts = var_forecasts(x)
+    backtest = var_backtest(x)
+    assert backtest is not None
+    change, es = forecasts["change"], forecasts["es975"]
+    hits = change < -forecasts["var975"]
+    assert backtest.es_exceptions == int(hits.sum()) > 0
+    assert backtest.es_rate == backtest.es_exceptions / backtest.days
+    assert backtest.es_kupiec_p == kupiec_pof(backtest.es_exceptions, backtest.days, ES_LEVEL)
+    assert backtest.es_christoffersen_p == christoffersen_independence(hits.to_numpy())
+    assert backtest.es_ratio == pytest.approx((-change[hits] / es[hits]).mean())
+    days = len(forecasts)
+    expected = (change * hits / (days * (1 - ES_LEVEL) * es)).sum() + 1
+    assert backtest.z2 == pytest.approx(expected)
+
+
+def test_the_z2_p_value_repeats_and_is_a_share() -> None:
+    x = _series(np.random.default_rng(14).normal(0, 1, 1600))
+    first, second = var_backtest(x), var_backtest(x)
+    assert first is not None and second is not None
+    assert first.z2_p == second.z2_p
+    assert 0.0 <= first.z2_p <= 1.0
+    # Well-specified normal changes should not reject the ES.
+    assert first.z2_p > 0.05
+
+
+def test_an_understated_es_has_a_small_z2_p() -> None:
+    """Calm years, then losses far beyond what the scenarios hold."""
+    rng = np.random.default_rng(15)
+    x = rng.normal(0, 1, 1600)
+    x[-300::10] = -12.0
+    backtest = var_backtest(_series(x))
+    assert backtest is not None
+    assert backtest.z2 < 0
+    assert backtest.z2_p < 0.05
 
 
 def test_a_regime_shift_breaks_plain_hs_but_not_the_filtered_var() -> None:
@@ -408,6 +485,109 @@ def test_no_left_out_change_is_next_to_a_switch() -> None:
     assert not near[positions].any()
     assert not set(excluded.index) & set(clean_changes(table).index)
     assert table.index[0] not in excluded.index
+
+
+def test_the_summary_carries_the_sample_bias() -> None:
+    table = _delivery_table()
+    summary = risk_summary(table)
+    assert summary is not None
+    assert summary.bias == sample_bias(table)
+
+
+def test_left_out_changes_like_the_clean_ones_leave_the_var_about_the_same() -> None:
+    dates = pd.bdate_range("2019-01-02", "2025-12-31")
+    flagged = crush_flags(dates).to_numpy()
+    steps = np.random.default_rng(16).normal(0, 2, len(dates) - 1)
+    table = _from_changes(steps, flagged=list(flagged))
+    table.index = dates
+    bias, summary = sample_bias(table), risk_summary(table)
+    assert bias is not None and summary is not None
+    assert bias.combined_changes > summary.changes + 100
+    assert bias.combined_var == pytest.approx(summary.var, rel=0.15)
+
+
+def test_left_out_changes_after_the_last_clean_one_do_not_move_the_combined_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The combined VaR is measured on the clean VaR's date, not on a later left-out change."""
+    table = _delivery_table()
+    bias, summary = sample_bias(table), risk_summary(table)
+    assert bias is not None and summary is not None
+    left_out = excluded_changes(table)
+    later = pd.Series([-80.0, 90.0, -70.0], index=pd.bdate_range(summary.date, periods=4)[1:])
+    monkeypatch.setattr(engine, "excluded_changes", lambda _: pd.concat([left_out, later]))
+    moved = sample_bias(table)
+    assert moved is not None
+    assert (moved.combined_changes, moved.combined_var) == (
+        bias.combined_changes,
+        bias.combined_var,
+    )
+
+
+def test_percent_shares_add_up_to_the_rounded_total() -> None:
+    # Plain rounding gives 69 + 28 + 2 = 99; the largest remainder takes the missing point.
+    assert engine.percent_shares({"oil": 0.6944, "meal": 0.2810, "beans": 0.0246}) == {
+        "oil": 69,
+        "meal": 28,
+        "beans": 3,
+    }
+    shown = engine.percent_shares({"oil": 0.62, "meal": 0.71, "beans": -0.33})
+    assert shown == {"oil": 62, "meal": 71, "beans": -33}
+    assert engine.percent_shares({"oil": 0.002, "meal": 1.0, "beans": -0.002}) == {
+        "oil": 0,
+        "meal": 100,
+        "beans": 0,
+    }
+    assert sum(engine.percent_shares({"a": 1 / 3, "b": 1 / 3, "c": 1 / 3}).values()) == 100
+
+
+def test_the_clean_var_is_tested_on_the_left_out_changes() -> None:
+    """Each left-out change takes the clean forecast for the next clean change."""
+    table = _delivery_table()
+    clean = clean_changes(table)["crush"]
+    bias, summary = sample_bias(table), risk_summary(table)
+    assert bias is not None and summary is not None
+    forecasts = var_forecasts(clean)
+    excluded = excluded_changes(table).loc[summary.date - pd.DateOffset(years=5) : summary.date]
+    dates = pd.DatetimeIndex(clean.index)
+    tested = exceptions = 0
+    for t, change in excluded.items():
+        nxt = dates[dates.searchsorted(t)]
+        if nxt in forecasts.index:
+            tested += 1
+            exceptions += int(change < -forecasts.loc[nxt, "fhs"])
+    assert tested > 100
+    assert (bias.excluded_tested, bias.excluded_exceptions) == (tested, exceptions)
+    # Three times as volatile, so the clean VaR under-covers them.
+    assert bias.excluded_exceptions / bias.excluded_tested > 0.10
+    assert bias.excluded_kupiec_p == kupiec_pof(exceptions, tested)
+    assert bias.combined_var > summary.var
+
+
+def test_worst_changes_are_the_largest_clean_losses_of_the_window() -> None:
+    rng = np.random.default_rng(17)
+    steps = rng.normal(0, 2, 1800)
+    steps[5] = -500.0  # more than 5 years before the last change
+    flagged = [False] * 1801
+    flagged[1500:1503] = [True] * 3
+    steps[1500] = -900.0  # into a flagged session
+    table = _from_changes(steps, flagged=flagged)
+    clean = clean_changes(table)["crush"]
+    worst = worst_changes(clean)
+    assert len(worst) == WORST_DAYS
+    losses = [loss for _, loss in worst]
+    assert losses == sorted(losses)
+    window = clean.loc[clean.index[-1] - pd.DateOffset(years=5) :]
+    expected = window.nsmallest(WORST_DAYS) * NOTIONAL_TONNES
+    assert [d for d, _ in worst] == list(expected.index)
+    assert losses == pytest.approx(list(expected))
+    assert min(losses) > -100 * NOTIONAL_TONNES
+    assert len(worst_changes(clean, 5)) == 5
+    assert worst_changes(clean_changes(crush_table(pd.DataFrame()))["crush"]) == ()
+    assert worst_changes(pd.Series([1.0, 2.0], index=pd.bdate_range("2024-01-01", periods=2))) == ()
+    summary = risk_summary(table)
+    assert summary is not None
+    assert summary.worst == worst
 
 
 def test_sample_bias_needs_both_samples() -> None:

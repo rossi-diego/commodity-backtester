@@ -6,6 +6,7 @@ from __future__ import annotations
 import datetime
 import logging
 import math
+import re
 import shutil
 import string
 from typing import Any
@@ -18,12 +19,13 @@ from scripts import readme_figures
 from src import config
 from src.data_loader import LoadResult, read_snapshot
 from src.margins import add_rins, gap_table
-from src.rins import RinResult, _read
+from src.rins import RinResult, read_d4_csv
+from tests.test_margins import PINNED_DATE
 
 
 @pytest.fixture(scope="module")
 def seed() -> pd.Series:
-    series = _read(config.RIN_SEED)
+    series = read_d4_csv(config.RIN_SEED)
     assert series is not None
     return series
 
@@ -40,6 +42,9 @@ def _expected_keys(last_year: int) -> set[str]:
         "d4_usd_per_rin",
         "d4_usd_per_m3",
         "btc_usd_per_m3",
+        "d4_breakeven_date",
+        "latest_gap",
+        "rin_break_even_usd",
         "latest_after_rin",
         "latest_after_rin_date",
         "latest_after_rin_held",
@@ -60,6 +65,8 @@ def _expected_keys(last_year: int) -> set[str]:
         "risk_share_oil",
         "risk_share_meal",
         "risk_share_beans",
+        "risk_es_tail_scenarios",
+        *(f"risk_worst_{rank}_{part}" for rank in (1, 2, 3) for part in ("date", "usd")),
         "risk_backtest_start",
         "risk_backtest_days",
         "risk_backtest_exceptions",
@@ -70,11 +77,25 @@ def _expected_keys(last_year: int) -> set[str]:
         "risk_christoffersen_p",
         "risk_hs_kupiec_p",
         "risk_hs_christoffersen_p",
+        "risk_es_backtest_exceptions",
+        "risk_es_backtest_rate_pct",
+        "risk_es_kupiec_p",
+        "risk_es_christoffersen_p",
+        "risk_es_back_to_back",
+        "risk_es_ratio",
+        "risk_z2",
+        "risk_z2_p",
         "risk_clean_days_8_14_months",
         "risk_kept_changes",
         "risk_excluded_changes",
         "risk_kept_sd_usd_t",
         "risk_excluded_sd_usd_t",
+        "risk_combined_changes",
+        "risk_combined_var_usd",
+        "risk_excluded_tested",
+        "risk_excluded_exceptions",
+        "risk_excluded_rate_pct",
+        "risk_excluded_kupiec_p",
     }
 
 
@@ -125,7 +146,7 @@ def test_main_logs_every_figure(synthetic_prices, seed, caplog, capsys) -> None:
         patch.object(readme_figures, "load_d4", return_value=RinResult(seed, "seed")),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main([])
+        assert readme_figures.main([]) == 0
     lines = _figure_lines(caplog)
     assert len(lines) == len(_expected_keys(synthetic_prices.index.max().year))
     assert any("name=btc_usd_per_m3 value=264" in line for line in lines)
@@ -138,7 +159,14 @@ def test_main_logs_a_load_failure(caplog) -> None:
         patch.object(readme_figures, "load_prices", return_value=failed),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main([])
+        assert readme_figures.main([]) == 1
+    assert any("event=readme_figures_failed" in r.getMessage() for r in caplog.records)
+
+
+def test_main_returns_1_on_an_unreadable_snapshot(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(readme_figures, "FIXTURES", tmp_path)
+    with caplog.at_level(logging.INFO, logger=readme_figures.__name__):
+        assert readme_figures.main(["--snapshot"]) == 1
     assert any("event=readme_figures_failed" in r.getMessage() for r in caplog.records)
 
 
@@ -149,7 +177,7 @@ def test_main_snapshot_needs_no_live_data(caplog, capsys) -> None:
         patch.object(readme_figures, "load_d4", side_effect=offline),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main(["--snapshot"])
+        assert readme_figures.main(["--snapshot"]) == 0
     lines = _figure_lines(caplog)
     assert len(lines) == len(EXPECTED)
     assert "event=readme_figure name=risk_var_usd value=6114" in lines
@@ -167,10 +195,10 @@ def test_write_snapshot_round_trips(synthetic_prices, tmp_path, monkeypatch, cap
         patch.object(readme_figures, "load_prices", return_value=loaded),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main(["--write-snapshot"])
+        assert readme_figures.main(["--write-snapshot"]) == 0
         prices_path = readme_figures.price_snapshot(as_of.isoformat())
         first = prices_path.read_bytes()
-        readme_figures.main(["--write-snapshot"])
+        assert readme_figures.main(["--write-snapshot"]) == 0
     assert prices_path.read_bytes() == first
     back = read_snapshot(prices_path)
     pd.testing.assert_frame_equal(
@@ -197,9 +225,28 @@ def test_write_snapshot_logs_what_is_missing(
         patch.object(readme_figures, "load_prices", return_value=loaded),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main(["--write-snapshot"])
+        assert readme_figures.main(["--write-snapshot"]) == 1
     assert any("event=snapshot_failed" in r.getMessage() for r in caplog.records)
     assert not (tmp_path / "fixtures").exists()
+
+
+def test_a_failed_snapshot_write_returns_1(synthetic_prices, tmp_path, monkeypatch, caplog) -> None:
+    rin_cache = tmp_path / "rin_d4.csv"
+    shutil.copyfile(readme_figures.d4_snapshot(), rin_cache)
+    monkeypatch.setattr(config, "RIN_CACHE", rin_cache)
+    monkeypatch.setattr(readme_figures, "FIXTURES", tmp_path / "new" / "fixtures")
+    loaded = LoadResult(synthetic_prices, synthetic_prices.index.max().date(), False, None)
+    with (
+        patch.object(readme_figures, "load_prices", return_value=loaded),
+        patch.object(readme_figures, "write_snapshot", side_effect=OSError('disk "full"')),
+        caplog.at_level(logging.INFO, logger=readme_figures.__name__),
+    ):
+        assert readme_figures.main(["--write-snapshot"]) == 1
+    failed = [r.getMessage() for r in caplog.records if "event=snapshot_failed" in r.getMessage()]
+    # Free text is repr-quoted, so the quotes inside the reason cannot end the field.
+    assert failed == ["event=snapshot_failed reason='disk \"full\"'"]
+    assert (tmp_path / "new" / "fixtures").is_dir()
+    assert not any("event=snapshot_written" in r.getMessage() for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +273,9 @@ EXPECTED: dict[str, Any] = {
     "gap_after_2025": -2,
     "gap_before_2026": 368,
     "gap_after_2026": -288,
+    "d4_breakeven_date": "2026-11-05",
+    "latest_gap": 85,
+    "rin_break_even_usd": 0.22,
     "latest_after_rin": -743,
     "latest_after_rin_date": "2026-11-05",
     "latest_after_rin_held": True,
@@ -243,9 +293,16 @@ EXPECTED: dict[str, Any] = {
     "risk_vol_ewma_usd_t": 3.59,
     "risk_var_usd": 6114,
     "risk_es_usd": 8720,
-    "risk_share_oil": 51,
-    "risk_share_meal": 31,
-    "risk_share_beans": 17,
+    "risk_share_oil": 69,
+    "risk_share_meal": 28,
+    "risk_share_beans": 3,
+    "risk_es_tail_scenarios": 18,
+    "risk_worst_1_date": "2023-07-26",
+    "risk_worst_1_usd": -11743,
+    "risk_worst_2_date": "2023-03-23",
+    "risk_worst_2_usd": -10079,
+    "risk_worst_3_date": "2026-06-05",
+    "risk_worst_3_usd": -10035,
     "risk_backtest_start": "2021-11-17",
     "risk_backtest_days": 685,
     "risk_backtest_exceptions": 33,
@@ -256,11 +313,25 @@ EXPECTED: dict[str, Any] = {
     "risk_christoffersen_p": 0.29,
     "risk_hs_kupiec_p": "<0.001",
     "risk_hs_christoffersen_p": "<0.001",
+    "risk_es_backtest_exceptions": 14,
+    "risk_es_backtest_rate_pct": 2.0,
+    "risk_es_kupiec_p": 0.43,
+    "risk_es_christoffersen_p": 0.03,
+    "risk_es_back_to_back": 2,
+    "risk_es_ratio": 0.97,
+    "risk_z2": 0.2,
+    "risk_z2_p": 0.84,
     "risk_clean_days_8_14_months": [2, 4, 6],
     "risk_kept_changes": 685,
     "risk_excluded_changes": 436,
     "risk_kept_sd_usd_t": 3.53,
     "risk_excluded_sd_usd_t": 4.49,
+    "risk_combined_changes": 1121,
+    "risk_combined_var_usd": 5925,
+    "risk_excluded_tested": 436,
+    "risk_excluded_exceptions": 27,
+    "risk_excluded_rate_pct": 6.2,
+    "risk_excluded_kupiec_p": 0.27,
 }
 
 # Rows of data/prices.parquet on 2026-11-05, when the snapshot was written.
@@ -276,6 +347,9 @@ README_QUOTES = [
         for year in range(readme_figures.FIRST_YEAR, 2026)
     ),
     "| 2026 (to date) | {gap_before_2026:+} | {gap_after_2026:+} |",
+    "On {d4_breakeven_date} the oil cost exceeds heating oil by {latest_gap} USD/m³, so a D4 RIN "
+    "of {rin_break_even_usd} USD would close the feedstock gap, before conversion costs, "
+    "against {d4_usd_per_rin} USD at the last EPA week.",
     "BTC, {btc_usd_per_m3} USD/m³",
     "{crush_flagged_share:.0%} of crush sessions",
     "they hold {top_moves_flagged} of the 20 largest daily moves",
@@ -292,9 +366,24 @@ README_QUOTES = [
     "| Plain HS, same window | {risk_backtest_days} | {risk_backtest_hs_exceptions} "
     "| {risk_backtest_hs_rate_pct}% | {risk_hs_kupiec_p} | {risk_hs_christoffersen_p} |",
     "(Christoffersen p {risk_hs_christoffersen_p})",
+    "With {risk_es_tail_scenarios} tail scenarios the split moves as the window rolls",
+    "| {risk_backtest_days} | {risk_es_backtest_exceptions} | {risk_es_backtest_rate_pct}% "
+    "| {risk_es_kupiec_p} | {risk_es_christoffersen_p} | {risk_es_ratio:.2f} | {risk_z2:.2f} "
+    "| {risk_z2_p:.2f} |",
+    "At 97.5%, {risk_es_back_to_back} of the {risk_es_backtest_exceptions} exceptions fall on "
+    "the clean change right after another exception, so independence is rejected at that level "
+    "(p {risk_es_christoffersen_p}); the 95% exceptions do not cluster (p {risk_christoffersen_p}).",
+    "A third line lists the three worst clean days of the 5 years, on 1,000 t: "
+    "{risk_worst_1_usd:,} USD on {risk_worst_1_date}, {risk_worst_2_usd:,} USD on "
+    "{risk_worst_2_date} and {risk_worst_3_usd:,} USD on {risk_worst_3_date}.",
     "In the 5 years to {risk_date}, {risk_excluded_changes} changes stay in one contract but "
-    "touch a delivery session, against {risk_kept_changes} clean ones; they are more volatile, "
-    "σ {risk_excluded_sd_usd_t} against {risk_kept_sd_usd_t} USD/t",
+    "touch a delivery session, against {risk_kept_changes} clean ones. They are more volatile, "
+    "σ {risk_excluded_sd_usd_t} against {risk_kept_sd_usd_t} USD/t, but leaving them out is "
+    "not shown to understate the VaR on this sample: on all {risk_combined_changes:,} changes the same "
+    "method gives {risk_combined_var_usd:,} USD against {risk_var_usd:,}, and the clean VaR, "
+    "tested on the {risk_excluded_tested} left-out changes, has {risk_excluded_exceptions} "
+    "exceptions ({risk_excluded_rate_pct}%, Kupiec p {risk_excluded_kupiec_p}).",
+    "`event=data_load source=cache rows={snapshot_rows} as_of={data_date}`",
 ]
 
 
@@ -307,7 +396,8 @@ class _ReadmeFormat(string.Formatter):
 
 
 def _quotes(figures: dict[str, Any]) -> list[str]:
-    return [_ReadmeFormat().format(quote, **figures) for quote in README_QUOTES]
+    values = figures | {"snapshot_rows": SNAPSHOT_ROWS}
+    return [_ReadmeFormat().format(quote, **values) for quote in README_QUOTES]
 
 
 @pytest.fixture(scope="module")
@@ -326,7 +416,7 @@ def test_snapshot_shape(snapshot) -> None:
 
 
 def test_snapshot_reproduces_readme_figures(snapshot) -> None:
-    d4 = _read(readme_figures.d4_snapshot())
+    d4 = read_d4_csv(readme_figures.d4_snapshot())
     assert readme_figures.compute(snapshot, d4) == EXPECTED
 
 
@@ -334,6 +424,26 @@ def test_readme_quotes_the_figures() -> None:
     readme = (config.PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     missing = [quote for quote in _quotes(EXPECTED) if quote not in readme]
     assert not missing
+
+
+def test_every_readme_date_is_traceable() -> None:
+    """A date in the README is a figure, the snapshot's date or the session pinned by a test."""
+    readme = (config.PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    known = {value for value in EXPECTED.values() if isinstance(value, str)}
+    known |= {readme_figures.SNAPSHOT_DATE, PINNED_DATE}
+    dates = set(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", readme))
+    assert dates
+    assert dates <= known, sorted(dates - known)
+
+
+def test_readme_claims_hold_on_the_snapshot() -> None:
+    """Sentences the README states in words, not figures."""
+    # "the oil cost exceeds heating oil", and a positive break-even.
+    assert EXPECTED["latest_gap"] > 0
+    assert EXPECTED["rin_break_even_usd"] > 0
+    assert EXPECTED["risk_combined_var_usd"] < EXPECTED["risk_var_usd"]
+    assert EXPECTED["risk_es_christoffersen_p"] < 0.05 <= EXPECTED["risk_christoffersen_p"]
+    assert EXPECTED["risk_z2_p"] >= 0.05
 
 
 def test_a_changed_figure_is_caught() -> None:

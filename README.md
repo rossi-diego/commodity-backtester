@@ -12,7 +12,7 @@ Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/)
 
 A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third to about half of that product value, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
 
-![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR backtest line](docs/screenshot.png)
+![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR and ES backtest lines and the worst clean days](docs/screenshot.png)
 
 ---
 
@@ -23,14 +23,14 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
 | 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
 | 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
-| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over the last 20 clean changes and 1 year, 1-day VaR 95% and ES 97.5% (filtered historical simulation, backtested) on a long 1,000 t board crush, and each leg's share of the risk | USD per tonne and USD |
+| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over the last 20 clean changes and 1 year, 1-day VaR 95% and ES 97.5% (filtered historical simulation, backtested) on a 1,000 t crusher's margin, unhedged, and each leg's share of the ES | USD per tonne and USD |
 
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
 - **History**: the series over 5 years, 10 years or all of it, with roll and delivery sessions in grey.
 - **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. This year's legend entry reads "2026 (to date)", and the month in progress is a hollow dot, not joined to the line.
 
-The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap after the RIN is drawn in cyan, a colour no other line uses. The third card always shows both numbers, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
+The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap after the RIN is drawn in cyan, a colour no other line uses. The third card shows the gap before the RIN and the D4 price that would close it, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
 
 ## How it is calculated
 
@@ -45,7 +45,7 @@ The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap
 
 Unit conversions use the exact definitions (1 lb = 0.45359237 kg, 1 US gallon = 3.785411784 L) and are tested in `tests/test_constants.py`.
 
-On 2026-10-27 the crush margin was 88.43 USD/t (2.41 USD/bu), oil was 50% of the product value, and soybean oil cost 1,324 USD per m³ of biodiesel against 1,262 USD/m³ for heating oil. `tests/test_margins.py` asserts these figures from that day's closes.
+On 2026-10-27, a session pinned in `tests/test_margins.py`, the crush margin was 88.43 USD/t (2.41 USD/bu), oil was 50% of the product value, and soybean oil cost 1,324 USD per m³ of biodiesel against 1,262 USD/m³ for heating oil. The test asserts these figures from that day's closes.
 
 The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per m³ of biodiesel. Yearly averages of the oil cost against heating oil, in USD/m³, on clean sessions, with held RIN prices excluded:
 
@@ -58,6 +58,8 @@ The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per 
 | 2025 | +361 | −2 |
 | 2026 (to date) | +368 | −288 |
 
+On 2026-11-05 the oil cost exceeds heating oil by 85 USD/m³, so a D4 RIN of 0.22 USD would close the feedstock gap, before conversion costs, against 2.09 USD at the last EPA week.
+
 The D4, yearly, roll and risk figures in this README come from `python -m scripts.readme_figures --snapshot` (data to 2026-11-05, committed in tests/fixtures) and are asserted by tests/test_readme_figures.py.
 
 The D4 does not simply close the gap, because the gap is not the producer's whole bill. A negative value after the RIN is what is left to pay for conversion (methanol, energy, the plant) and for margin. Through 2024 the $1/gal blenders' tax credit (BTC, 264 USD/m³) paid part of the gap ([AFDC](https://afdc.energy.gov/laws/395)), and from 2025 the 45Z clean fuel production credit replaced it, with a value that depends on carbon intensity ([IRS](https://www.irs.gov/credits-deductions/clean-fuel-production-credit)). LCFS credits pay in some states ([AFDC](https://afdc.energy.gov/laws/6308)), and renewable diesel, at 1.7 RINs per gallon ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)), is the marginal gallon.
@@ -66,7 +68,7 @@ On 2026-11-05 the RIN value exceeds the feedstock gap by about 743 USD/m³, usin
 
 ## Risk on a notional crush
 
-Under the crush chart, one row gives the 1-day risk of a long board crush of 1,000 t of soybeans: long meal and oil, short soybeans. It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
+Under the crush chart, one row gives the 1-day risk of the crusher's margin on 1,000 t, unhedged (long meal and oil, short soybeans). It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
 
 | Measure | Formula |
 |---|---|
@@ -79,13 +81,14 @@ Under the crush chart, one row gives the 1-day risk of a long board crush of 1,0
 | VaR 95% | −1,000 t × σ_next × (5% quantile of z over 5 years), linear interpolation, 1 day, no square-root-of-time scaling |
 | ES 97.5% | −1,000 t × σ_next × (mean of z at or below its 2.5% quantile) |
 | Backtest | Each change in the 5 years is forecast only from earlier changes; an exception is a P&L below −VaR. Kupiec POF against 5% and Christoffersen independence, each χ² with 1 df |
-| Risk by leg | cov(leg, Δcrush) / var(Δcrush) for meal, oil and −soybeans, equal-weighted over 5 years. The three add up to 100%, and a leg that offsets the others is negative |
+| ES backtest | The same forecasts at 97.5%: an exception is a P&L below −VaR 97.5%, scored against the ES forecast for its day by Acerbi and Szekely's (2014) Z2, 0 in expectation and negative when the ES is understated |
+| Share of ES by leg | Euler allocation of the ES: each leg's mean P&L in the scenarios at or below the 2.5% quantile, over the crush's. The three add up to 100%, and a leg that offsets the others is negative. With 18 tail scenarios the split moves as the window rolls |
 
 On the clean changes to 2026-10-29 (685 in 5 years; data to 2026-11-05), with σ_next = 3.59 USD/t:
 
-| Daily σ, last 20 changes | Daily σ, 1 year | 1-day VaR 95% | 1-day ES 97.5% | Risk by leg |
+| Daily σ, last 20 changes | Daily σ, 1 year | 1-day VaR 95% | 1-day ES 97.5% | Share of ES by leg |
 |---:|---:|---:|---:|---|
-| 3.91 USD/t | 3.66 USD/t | 6,114 USD | 8,720 USD | oil 51%, meal 31%, soybeans 17% |
+| 3.91 USD/t | 3.66 USD/t | 6,114 USD | 8,720 USD | oil 69%, meal 28%, soybeans 3% |
 
 A change needs two clean ends, so 685 changes in 5 years is about 137 a year. That is why the window is 5 years: one year would leave about 3 scenarios beyond the 97.5% quantile.
 
@@ -96,11 +99,23 @@ Backtest from 2021-11-17 to 2026-10-29, at 95%:
 | Filtered HS (shown) | 685 | 33 | 4.8% | 0.83 | 0.29 |
 | Plain HS, same window | 685 | 65 | 9.5% | <0.001 | <0.001 |
 
-Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version. The page states its backtest in one line under the four risk cells, after a chip: "Holds" when both p-values are 0.05 or more, "Under-covers" when either is below.
+Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version. The page states its backtest in one line under the four risk cells, after a chip. The chip reads "Holds" when both p-values are 0.05 or more; "Under-covers" or "Over-conservative" when Kupiec rejects with too many or too few exceptions; and "Clusters" when only the independence test rejects.
+
+ES backtest at 97.5%, on the same days:
+
+| Changes | Exceptions | Rate | Kupiec p | Christoffersen p | Mean loss / ES | Z2 | p |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 685 | 14 | 2.0% | 0.43 | 0.03 | 0.97 | 0.20 | 0.84 |
+
+Mean loss / ES is the average loss on an exception day over that day's ES forecast. The published −0.70 critical value of Z2 is for 250 days, so the p-value is simulated: 2,000 samples, each drawing every day's outcome from that day's own scenarios, with a fixed seed. A second line on the page states this test, after its own chip. The ES chip follows the same order: "Under-covers" when the simulated Acerbi–Szekely p is below 0.05, "Clusters" when only the independence test of the 97.5% exceptions rejects, and "Holds" otherwise. On this sample it reads "Clusters".
+
+At 97.5%, 2 of the 14 exceptions fall on the clean change right after another exception, so independence is rejected at that level (p 0.03); the 95% exceptions do not cluster (p 0.29).
+
+A third line lists the three worst clean days of the 5 years, on 1,000 t: −11,743 USD on 2023-07-26, −10,079 USD on 2023-03-23 and −10,035 USD on 2026-06-05.
 
 ### What the risk sample leaves out
 
-In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones; they are more volatile, σ 4.49 against 3.53 USD/t. The VaR therefore does not cover holding a contract into delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
+In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones. They are more volatile, σ 4.49 against 3.53 USD/t, but leaving them out is not shown to understate the VaR on this sample: on all 1,121 changes the same method gives 5,925 USD against 6,114, and the clean VaR, tested on the 436 left-out changes, has 27 exceptions (6.2%, Kupiec p 0.27). The VaR still does not model taking or making delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
 
 ## Rolls and delivery
 
@@ -143,14 +158,14 @@ src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg dr
 src/rolls.py     contract calendars: delivery and switch flags
 src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
 src/seasonal.py  latest clean reading, 5-year percentile, monthly averages by year
-src/risk.py      clean daily changes; filtered 1-day VaR and ES, backtest, risk by leg
+src/risk.py      clean daily changes; filtered 1-day VaR and ES, backtests, ES by leg
    |
    v
 src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy)
    + src/styles.py (page CSS) -> app.py (Streamlit page)
 ```
 
-Logs use `key=value` fields, for example `event=data_load source=cache rows=6711 as_of=2026-10-30`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
+Logs use `key=value` fields, for example `event=data_load source=cache rows=6714 as_of=2026-11-05`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
 
 ## Quick start
 
@@ -196,7 +211,6 @@ soybean-crush-margin/
 ├── app.py                      # Streamlit page only
 ├── .streamlit/config.toml      # Dark theme
 ├── docs/screenshot.png         # README screenshot
-├── docs/{before,after}_*.png   # Full page with the D4 RIN on, at 1440, 1024 and 390 px
 ├── data/seed/                  # Dated copy of the EPA D4 RIN series, the fallback
 ├── src/
 │   ├── config.py               # Paths and cache settings
@@ -206,7 +220,7 @@ soybean-crush-margin/
 │   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
 │   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions
-│   ├── risk.py                 # Clean daily changes, filtered VaR and ES, backtest, risk by leg
+│   ├── risk.py                 # Clean daily changes, filtered VaR and ES, backtests, ES by leg
 │   ├── visualization.py        # Plotly figure builders, no UI imports
 │   ├── cards.py                # HTML for the cards, rails and method notes
 │   ├── styles.py               # The page CSS

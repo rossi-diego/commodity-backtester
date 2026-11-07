@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from .cards import MethodCard
+from .cards import MethodCard, RiskCopy
 from .rins import EPA_PAGE
 
 REPOSITORY_URL: Final[str] = "https://github.com/rossi-diego/soybean-crush-margin"
@@ -45,11 +45,22 @@ WHAT: Final[dict[str, str]] = {
     ),
 }
 
-# "Reading the chart", at most 30 words each, by view.
-READING_HISTORY: Final[str] = (
-    "Coloured line: clean sessions; the dot is the latest. Thin grey: roll or delivery sessions, "
-    "left out of every statistic."
-)
+# "Reading the chart", at most 35 words each, by view. The history view names each
+# section's own line colour, as drawn in ``app.py``.
+READING_HISTORY: Final[dict[str, str]] = {
+    "crush": (
+        "Amber line: margin per tonne on clean sessions; the dot is the latest. Thin grey, where "
+        "the amber breaks: roll or delivery sessions, left out of every statistic."
+    ),
+    "share": (
+        "Blue line: oil's share of product value; above 50%, oil earns more than meal. Thin "
+        "grey, where the blue breaks: roll or delivery sessions, left out of every statistic."
+    ),
+    "gap": (
+        "White line: oil minus heating oil per m³; above zero the oil is dearer. Thin grey, "
+        "where the white breaks: roll or delivery sessions, left out of every statistic."
+    ),
+}
 READING_BY_MONTH: Final[str] = (
     "Bold: this year; hollow dot: month to date. Colours: years you pick. Band: range of "
     "five previous years. Clean sessions fall mostly late in the month."
@@ -59,18 +70,53 @@ READING_RIN: Final[str] = (
     "oil cost. Dashed: EPA price held. Dotted: before the RIN."
 )
 
-# Under the crush chart's risk strip, at most 30 words.
+# The third card's detail and caption. ``break_even`` is filled with the break-even and the
+# latest D4 price, in USD per RIN, and " (held)" when the EPA price is held.
+GAP_CARD: Final[dict[str, str]] = {
+    "break_even": "Break-even D4 RIN ${be:.2f} before conversion costs; latest D4 ${d4:.2f}{held}.",
+    "no_rin": "Heating oil alone covers the oil: no RIN needed before conversion costs.",
+    "no_d4": "D4 RIN prices could not be loaded.",
+    "scope": "Feedstock only: before conversion costs, BTC/45Z and LCFS.",
+}
+
+# Under the crush chart's risk strip, at most 30 words with any RISK_EFFECT. The effect
+# is what the left-out changes do to the VaR, picked from the data by ``cards.risk_effect``.
 RISK_NOTE: Final[str] = (
     "Filtered historical simulation: 5 years of clean changes scaled to today's EWMA "
-    "volatility. Roll and delivery days are left out; they would lower the VaR. Long 1,000 t "
-    "board crush."
+    "volatility. Roll and delivery days are left out; {effect}. Crusher's margin, unhedged, "
+    "1,000 t."
 )
+RISK_EFFECT: Final[dict[str, str]] = {
+    "lower": "they would lower the VaR",
+    "raise": "they would raise the VaR",
+    "none": "too few to test",
+}
 
-# The backtest line in the same strip, at most 30 words once filled by
-# ``cards.backtest_line`` from a Backtest and the risk constants; p-values arrive as text.
+# The backtest lines in the same strip, at most 30 words each once filled by
+# ``cards.backtest_line`` and ``cards.es_backtest_line`` from a Backtest and the risk
+# constants; p-values arrive as text. No-break spaces keep each test's name, its "p" and the
+# value together, and a word joiner keeps the en dash from breaking the name, so a narrow
+# strip never ends a line on a bare "p".
 BACKTEST_LINE: Final[str] = (
     "Backtest, {years} years: {exceptions} of {days:,} changes beyond the VaR ({rate:.1%}, "
-    "{expected:.0%} expected); Kupiec p {kupiec}, independence p {independence}."
+    "{expected:.0%} expected); Kupiec\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{kupiec}, "
+    "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
+)
+ES_BACKTEST_LINE: Final[str] = (
+    "ES backtest, {years} years: {exceptions:,} of {days:,} changes beyond the {level:.1%} VaR "
+    "({rate:.1%}, {expected:.1%} expected); mean loss {severity}; "
+    "Acerbi\N{EN DASH}\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{z2p}, "
+    "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
+)
+# The worst clean days, filled by ``cards.worst_line``: at most 30 words.
+WORST_LINE: Final[str] = "Worst clean days, {years} years, {tonnes:,} t: {days}."
+
+RISK_STRIP: Final[RiskCopy] = RiskCopy(
+    note=RISK_NOTE,
+    var_test=BACKTEST_LINE,
+    es_test=ES_BACKTEST_LINE,
+    worst=WORST_LINE,
+    effects=RISK_EFFECT,
 )
 
 METHOD: Final[list[MethodCard]] = [
@@ -158,12 +204,12 @@ FULL_METHOD: Final[str] = (
     "flags leave mostly the second half of the month. Ranks count clean sessions, so months "
     "without a delivery period weigh more. Part of the seasonal shape is the switch to "
     "new-crop contracts.\n\n"
-    "**Risk.** Filtered historical simulation on a long 1,000 t board crush, front-month "
-    "closes, not a hedge book. Each 1-day change between consecutive clean sessions in the past "
-    "5 years is divided by its EWMA volatility (λ = 0.94), and VaR and ES are the tails of those "
+    "**Risk.** Filtered historical simulation on the crusher's margin on 1,000 t, unhedged "
+    "(long meal and oil, short soybeans), front-month closes, not a hedge book. Each 1-day "
+    "change between consecutive clean sessions in the past 5 years is divided by its EWMA volatility (λ = 0.94), and VaR and ES are the tails of those "
     "standardised changes times today's EWMA volatility. Unfiltered, a 5-year window weighs calm "
     "and volatile years the same, so its exceptions cluster. The backtest forecasts each change "
     "only from the changes before it. Delivery-period and roll changes are left out; see the "
-    "README for what that costs. Risk by leg is each leg's covariance with the crush over 5 "
-    "years, over its variance."
+    "README for what that costs. Each leg's share of the ES is its mean in the ES scenarios "
+    "over the crush's."
 )

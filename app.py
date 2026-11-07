@@ -24,7 +24,7 @@ from src.cards import (
 )
 from src.constants import BUSHELS_PER_TONNE
 from src.data_loader import LoadResult, load_prices
-from src.margins import add_rins, crush_table, gap_table, per_gallon
+from src.margins import add_rins, break_even_d4, crush_table, gap_table, per_gallon
 from src.rins import RinResult, load_d4
 from src.risk import RiskSummary, risk_summary
 from src.seasonal import (
@@ -37,15 +37,15 @@ from src.seasonal import (
 )
 from src.styles import APP_CSS
 from src.text import (
-    BACKTEST_LINE,
     FULL_METHOD,
+    GAP_CARD,
     LINKEDIN_URL,
     METHOD,
     READING_BY_MONTH,
     READING_HISTORY,
     READING_RIN,
     REPOSITORY_URL,
-    RISK_NOTE,
+    RISK_STRIP,
     SCOPE,
     WHAT,
 )
@@ -149,12 +149,13 @@ def _after_words(value: float) -> str:
 
 
 def _rin_note(rins: RinResult, latest: pd.Timestamp) -> str:
+    # The week only: the card's detail states the D4 price, once.
     if rins.prices is None or rins.as_of is None:
-        return "D4 RIN prices could not be loaded"
+        return ""
     week = pd.Timestamp(rins.as_of)
     weeks = max((latest - week).days // 7, 0)
     saved = ", saved copy" if rins.source == "seed" else ""
-    return f"D4 ${float(rins.prices.iloc[-1]):.2f}, week of {week.day} {week:%b} (EPA{saved}, {weeks} weeks old)"
+    return f"D4 week of {week.day} {week:%b} (EPA{saved}, {weeks} weeks old). "
 
 
 # ---------------------------------------------------------------------------
@@ -219,24 +220,26 @@ def _kpis(
     if before is None:
         cards.append(Kpi("gap", 3, "Oil cost vs diesel", "n/a", "", "Prices missing.", None, ""))
     else:
-        after = gap["after_rin"].where(~gap["flagged"]).dropna()
-        detail = "D4 RIN prices could not be loaded."
-        if not after.empty:
-            detail = f"With the D4 RIN: {_after_words(float(after.iloc[-1]))}."
-            if bool(gap.loc[after.index[-1], "rin_held"]):
-                detail += " D4 price held."
+        detail = GAP_CARD["no_rin"] if before.value <= 0 else GAP_CARD["no_d4"]
+        if before.value > 0 and rins.prices is not None:
+            held = " (held)" if bool(gap.loc[before.date, "rin_held"]) else ""
+            d4 = float(rins.prices.iloc[-1])
+            detail = GAP_CARD["break_even"].format(be=break_even_d4(before.value), d4=d4, held=held)
         side = "dearer" if before.value >= 0 else "cheaper"
+        gallon = _usd(per_gallon(before.value), "gal", signed=True, decimals=2)
+        # No-break spaces keep the date whole when the note wraps beside the value.
+        day = _day(before.date).replace(" ", " ")
         cards.append(
             Kpi(
                 key="gap",
                 number=3,
                 label="Oil cost vs diesel",
                 value=_usd(before.value, "m³", signed=True),
-                note=f"oil {side} · {_usd(per_gallon(before.value), 'gal', signed=True, decimals=2)}",
+                note=f"oil {side} · {gallon} · {day}",
                 detail=detail,
                 percentile=before.percentile,
                 rank_of="before the RIN",
-                caption=f"{_rin_note(rins, before.latest_date)}. Feedstock only: before conversion costs, BTC/45Z and LCFS.",
+                caption=f"{_rin_note(rins, before.latest_date)}{GAP_CARD['scope']}",
             )
         )
     st.html(kpi_row_html(cards))
@@ -399,7 +402,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
             sentence = (
                 f"{_usd(reading.value, 't')} on {_day(reading.date)}, {_rank_clause(reading)}."
             )
-            return SectionBody(sentence, fig, READING_HISTORY, today)
+            return SectionBody(sentence, fig, READING_HISTORY["crush"], today)
         fig = by_month_figure(
             means,
             counts,
@@ -419,7 +422,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
         "Crush margin",
         body,
         _past_years(table.index, reading.latest_date.year),
-        footer=risk_strip_html(risk, RISK_NOTE, BACKTEST_LINE),
+        footer=risk_strip_html(risk, RISK_STRIP),
     )
 
 
@@ -450,7 +453,7 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
                 f"Oil is {reading.value:.0%} of the product value on {_day(reading.date)}, "
                 f"against a 5-year median of {median:.0%}."
             )
-            return SectionBody(sentence, fig, READING_HISTORY, today)
+            return SectionBody(sentence, fig, READING_HISTORY["share"], today)
         means, counts = monthly_means(percent, table["flagged"])
         fig = by_month_figure(
             means,
@@ -525,7 +528,7 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
                 f"The oil for 1 m³ of biodiesel costs {_usd(abs(reading.value), 'm³')} {side} "
                 f"than 1 m³ of heating oil, {_rank_clause(reading)}."
             )
-            return SectionBody(sentence, fig, READING_HISTORY, today)
+            return SectionBody(sentence, fig, READING_HISTORY["gap"], today)
         means, counts = monthly_means(table[column], flagged)
         fig = by_month_figure(
             means,

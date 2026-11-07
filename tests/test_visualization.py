@@ -90,8 +90,34 @@ def _delta_e(first: str, second: str) -> float:
     return float(np.linalg.norm(np.subtract(_lab(first), _lab(second))))
 
 
+def _oklab(color: str) -> tuple[float, float, float]:
+    """OKLab (Ottosson 2020), from linear sRGB."""
+    r, g, b = _linear(color)
+    lms = (
+        0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+        0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+        0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b,
+    )
+    l_, m_, s_ = (value ** (1 / 3) for value in lms)
+    return (
+        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_,
+    )
+
+
+def _oklab_delta_e(first: str, second: str) -> float:
+    """Euclidean distance in OKLab, where 1 spans black to white."""
+    return float(np.linalg.norm(np.subtract(_oklab(first), _oklab(second))))
+
+
 def _trace(fig, name: str):
     return next(trace for trace in fig.data if trace.name == name)
+
+
+def _drawn_roll(fig):
+    """The roll and delivery line itself, not its legend proxy."""
+    return next(t for t in fig.data if t.name == "Roll or delivery" and t.showlegend is False)
 
 
 def _names(fig) -> list[str]:
@@ -146,9 +172,27 @@ class TestHistory:
         clean = np.asarray(_trace(fig, "Crush").y, dtype=float)
         assert np.isnan(clean[crush["flagged"].to_numpy()]).all()
         assert list(fig.layout.xaxis.range) == [crush.index[0], crush.index[-1]]
-        roll = _trace(fig, "Roll or delivery")
+        # The legend proxy comes first and has no x values, so the type cannot be inferred.
+        assert fig.layout.xaxis.type == "date"
+        roll = _drawn_roll(fig)
         assert roll.line.color == ROLL
-        assert roll.line.width <= 0.8
+        assert roll.line.width <= 1.0
+        assert roll.line.dash is None
+
+    @pytest.mark.parametrize("index", [0, 1])
+    def test_one_visible_roll_legend_entry(self, tables, index) -> None:
+        """The thin roll line has no legend entry; a wider proxy, first, stands in for it."""
+        fig = _figures(tables)[index]
+        entries = [
+            trace
+            for trace in fig.data
+            if trace.name == "Roll or delivery" and trace.showlegend is not False
+        ]
+        assert len(entries) == 1
+        assert entries[0] is fig.data[0]
+        assert entries[0].line.width >= 2
+        assert entries[0].line.dash is None
+        assert entries[0].hoverinfo == "skip"
 
     def test_last_dot_is_the_last_clean_value(self, tables) -> None:
         crush, _ = tables
@@ -173,7 +217,7 @@ class TestHistory:
         fig = _figures(tables)[1]
         before = _trace(fig, "Before")
         assert before.line.dash == "dot"
-        assert before.line.color != _trace(fig, "Roll or delivery").line.color
+        assert before.line.color != _drawn_roll(fig).line.color
 
     def test_tick_step_only_when_asked(self, tables) -> None:
         crush, _ = tables
@@ -360,6 +404,15 @@ class TestColour:
     @pytest.mark.parametrize("name", list(LINES))
     def test_rin_cyan_is_far_from_every_other_line(self, name) -> None:
         assert _delta_e(RIN, LINES[name]) >= 30, name
+
+    @pytest.mark.parametrize("color", [*YEAR_COLORS, OIL, INK_SERIES, CRUSH, MEAL])
+    def test_rin_is_distinct(self, color) -> None:
+        """The cyan stays clear of the lines it can share a chart with, in OKLab too."""
+        assert 100 * _oklab_delta_e(RIN, color) >= 15, color
+
+    def test_oklab_helper_matches_known_values(self) -> None:
+        assert _oklab("#ffffff") == pytest.approx((1.0, 0.0, 0.0), abs=1e-3)
+        assert _oklab_delta_e("#000000", "#ffffff") == pytest.approx(1.0, abs=1e-3)
 
     def test_rin_cyan_reads_on_the_surface(self) -> None:
         assert _contrast(RIN, SURFACE) >= 4.5
