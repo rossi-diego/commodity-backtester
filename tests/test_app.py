@@ -532,7 +532,7 @@ class TestDataStates:
             for key in SECTIONS:
                 at.button_group(key=f"view-{key}").set_value("By month").run()
         _no_exceptions(at)
-        assert "last close is a roll day" in _kpis(at)
+        assert re.search(r"12 Nov close \$\d+/t, roll day", _kpis(at))
         st.cache_data.clear()
 
 

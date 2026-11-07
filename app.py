@@ -50,6 +50,16 @@ from src.text import (
     WHAT,
 )
 from src.visualization import CRUSH, INK_SERIES, MONTHS, OIL, RIN, by_month_figure, history_figure
+from src.wording import (
+    after_rin_words,
+    day,
+    latest_close_tag,
+    month_sentence,
+    previous_years,
+    rank_clause,
+    rin_note,
+    usd,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -106,27 +116,6 @@ def _risk(crush: pd.DataFrame) -> RiskSummary | None:
 # ---------------------------------------------------------------------------
 
 
-def _usd(value: float, unit: str, signed: bool = False, decimals: int = 0) -> str:
-    # A typographic minus, as on the chart axes, so a negative value never reads as a dash.
-    shown = round(value, decimals)
-    sign = "−" if shown < 0 else ("+" if signed and shown > 0 else "")
-    return f"{sign}${abs(value):,.{decimals}f}/{unit}"
-
-
-def _day(date: pd.Timestamp) -> str:
-    return f"{date.day} {date:%b %Y}"
-
-
-def _rank_clause(reading: Reading) -> str:
-    if reading.percentile is None:
-        return "with too little clean history to rank"
-    return f"higher than {reading.percentile:.0f}% of clean days in the past 5 years"
-
-
-def _previous(year: int) -> str:
-    return f"{year - LOOKBACK_YEARS}–{year - 1}"
-
-
 def _window(table: pd.DataFrame, window: str) -> pd.DataFrame:
     if window == "All" or table.empty:
         return table
@@ -137,25 +126,6 @@ def _window(table: pd.DataFrame, window: str) -> pd.DataFrame:
 def _median_5y(values: pd.Series, flagged: pd.Series, date: pd.Timestamp) -> float:
     clean = values[~flagged.astype(bool)].loc[date - pd.DateOffset(years=LOOKBACK_YEARS) : date]
     return float(clean.median())
-
-
-def _after_words(value: float) -> str:
-    if value < 0:
-        return (
-            f"the oil costs {_usd(-value, 'm³')} ({_usd(-per_gallon(value), 'gal', decimals=2)}) "
-            "less than heating oil plus the RIN"
-        )
-    return f"the oil still costs {_usd(value, 'm³')} more than heating oil plus the RIN"
-
-
-def _rin_note(rins: RinResult, latest: pd.Timestamp) -> str:
-    # The week only: the card's detail states the D4 price, once.
-    if rins.prices is None or rins.as_of is None:
-        return ""
-    week = pd.Timestamp(rins.as_of)
-    weeks = max((latest - week).days // 7, 0)
-    saved = ", saved copy" if rins.source == "seed" else ""
-    return f"D4 week of {week.day} {week:%b} (EPA{saved}, {weeks} weeks old). "
 
 
 # ---------------------------------------------------------------------------
@@ -177,20 +147,20 @@ def _kpis(
     crush_caption = "Gross margin, before plant costs."
     if versus is not None:
         crush_caption = (
-            f"{_usd(versus[0] - versus[1], 't', signed=True)} against the {month} average of "
-            f"{_previous(reading.date.year)}. Gross, before plant costs."
+            f"{usd(versus[0] - versus[1], 't', signed=True)} against the {month} average of "
+            f"{previous_years(reading.date.year)}. Gross, before plant costs."
         )
     cards = [
         Kpi(
             key="crush",
             number=1,
             label="Crush margin",
-            value=_usd(reading.value, "t"),
+            value=usd(reading.value, "t"),
             note="per tonne",
-            detail=f"${reading.value / BUSHELS_PER_TONNE:,.2f}/bu board crush · {_day(reading.date)}",
+            detail=f"${reading.value / BUSHELS_PER_TONNE:,.2f}/bu board crush · {day(reading.date)}",
             percentile=reading.percentile,
             caption=crush_caption,
-            tag="" if reading.date == reading.latest_date else "last close is a roll day",
+            tag=latest_close_tag(reading, float(crush["crush"].loc[reading.latest_date])),
         )
     ]
     share = readings["share"]
@@ -211,8 +181,8 @@ def _kpis(
                 caption=f"5-year median {median:.0%}. Oil's part of what a tonne of soybeans sells for.",
                 visual=split_bar_html(
                     share.value,
-                    _usd(row["oil_value"], "t"),
-                    _usd(row["meal_value"], "t"),
+                    usd(row["oil_value"], "t"),
+                    usd(row["meal_value"], "t"),
                 ),
             )
         )
@@ -226,20 +196,20 @@ def _kpis(
             d4 = float(rins.prices.iloc[-1])
             detail = GAP_CARD["break_even"].format(be=break_even_d4(before.value), d4=d4, held=held)
         side = "dearer" if before.value >= 0 else "cheaper"
-        gallon = _usd(per_gallon(before.value), "gal", signed=True, decimals=2)
+        gallon = usd(per_gallon(before.value), "gal", signed=True, decimals=2)
         # No-break spaces keep the date whole when the note wraps beside the value.
-        day = _day(before.date).replace(" ", " ")
+        gap_day = day(before.date).replace(" ", " ")
         cards.append(
             Kpi(
                 key="gap",
                 number=3,
                 label="Oil cost vs diesel",
-                value=_usd(before.value, "m³", signed=True),
-                note=f"oil {side} · {gallon} · {day}",
+                value=usd(before.value, "m³", signed=True),
+                note=f"oil {side} · {gallon} · {gap_day}",
                 detail=detail,
                 percentile=before.percentile,
                 rank_of="before the RIN",
-                caption=f"{_rin_note(rins, before.latest_date)}{GAP_CARD['scope']}",
+                caption=f"{rin_note(rins, before.latest_date)}{GAP_CARD['scope']}",
             )
         )
     st.html(kpi_row_html(cards))
@@ -318,20 +288,6 @@ def _past_years(index: pd.Index, current: int) -> list[int]:
     return years[::-1][:YEAR_CHOICES]
 
 
-def _month_sentence(
-    means: pd.DataFrame, date: pd.Timestamp, latest: pd.Timestamp, fmt: Callable[[float], str]
-) -> str:
-    month = MONTHS[date.month - 1]
-    versus = month_vs_average(means, date)
-    if versus is None:
-        return f"Monthly averages of clean sessions. {month} {date.year} has too few so far to compare."
-    so_far = " so far" if (date.year, date.month) == (latest.year, latest.month) else ""
-    return (
-        f"{month} {date.year} averages {fmt(versus[0])}{so_far}, against {fmt(versus[1])} "
-        f"for {month} in {_previous(date.year)}."
-    )
-
-
 def _section(
     key: str,
     number: int,
@@ -380,10 +336,10 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
         today = [
             ("Board crush", f"${reading.value / BUSHELS_PER_TONNE:,.2f}/bu"),
             (
-                f"{month} vs {_previous(reading.date.year)}",
-                "n/a" if versus is None else _usd(versus[0] - versus[1], "t", signed=True),
+                f"{month} vs {previous_years(reading.date.year)}",
+                "n/a" if versus is None else usd(versus[0] - versus[1], "t", signed=True),
             ),
-            ("52-week range", f"{_usd(low, 't')} to {_usd(high, 't')}"),
+            ("52-week range", f"{usd(low, 't')} to {usd(high, 't')}"),
         ]
         if c.view == "History":
             shown = _window(table, c.window)
@@ -399,9 +355,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
                     "Soybean cost": shown["beans"],
                 },
             )
-            sentence = (
-                f"{_usd(reading.value, 't')} on {_day(reading.date)}, {_rank_clause(reading)}."
-            )
+            sentence = f"{usd(reading.value, 't')} on {day(reading.date)}, {rank_clause(reading)}."
             return SectionBody(sentence, fig, READING_HISTORY["crush"], today)
         fig = by_month_figure(
             means,
@@ -413,7 +367,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
             band=c.band,
             month_to_date=reading.latest_date.month,
         )
-        sentence = _month_sentence(means, reading.date, reading.latest_date, lambda v: _usd(v, "t"))
+        sentence = month_sentence(means, reading.date, reading.latest_date, lambda v: usd(v, "t"))
         return SectionBody(sentence, fig, READING_BY_MONTH, today)
 
     _section(
@@ -433,9 +387,9 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
     def body(c: Controls) -> SectionBody:
         row = cast(pd.Series, table.loc[reading.date])
         today = [
-            ("Oil value", _usd(row["oil_value"], "t")),
-            ("Meal value", _usd(row["meal_value"], "t")),
-            ("Soybean cost", _usd(row["beans"], "t")),
+            ("Oil value", usd(row["oil_value"], "t")),
+            ("Meal value", usd(row["meal_value"], "t")),
+            ("Soybean cost", usd(row["beans"], "t")),
         ]
         if c.view == "History":
             shown = _window(table, c.window)
@@ -450,7 +404,7 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
             )
             median = _median_5y(table["oil_share"], table["flagged"], reading.date)
             sentence = (
-                f"Oil is {reading.value:.0%} of the product value on {_day(reading.date)}, "
+                f"Oil is {reading.value:.0%} of the product value on {day(reading.date)}, "
                 f"against a 5-year median of {median:.0%}."
             )
             return SectionBody(sentence, fig, READING_HISTORY["share"], today)
@@ -466,7 +420,7 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
             percent=True,
             month_to_date=reading.latest_date.month,
         )
-        sentence = _month_sentence(means, reading.date, reading.latest_date, lambda v: f"{v:.1f}%")
+        sentence = month_sentence(means, reading.date, reading.latest_date, lambda v: f"{v:.1f}%")
         return SectionBody(sentence, fig, READING_BY_MONTH, today)
 
     _section("share", 2, "Oil share", body, _past_years(table.index, reading.latest_date.year))
@@ -480,10 +434,10 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
         row = cast(pd.Series, table.loc[reading.date])
         rin_row = "n/a"
         if has_rins and pd.notna(row["rin_shown"]):
-            rin_row = _usd(row["rin_shown"], "m³")
+            rin_row = usd(row["rin_shown"], "m³")
         today = [
-            ("Oil feedstock", _usd(row["feedstock"], "m³")),
-            ("Heating oil (ULSD)", _usd(row["diesel"], "m³")),
+            ("Oil feedstock", usd(row["feedstock"], "m³")),
+            ("Heating oil (ULSD)", usd(row["diesel"], "m³")),
             ("D4 RIN value", rin_row),
         ]
         rin_on = c.rin and has_rins
@@ -516,17 +470,19 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
             if rin_on:
                 ranked = latest_reading(table[column], table["flagged"], unranked=table["rin_held"])
                 assert ranked is not None
-                sentence = f"With the D4 RIN, {_after_words(ranked.value)}, {_rank_clause(ranked)}."
+                sentence = (
+                    f"With the D4 RIN, {after_rin_words(ranked.value)}, {rank_clause(ranked)}."
+                )
                 if bool(table.loc[ranked.date, "rin_held"]):
                     sentence = (
                         f"With the D4 RIN held at the EPA week of {week.day} {week:%b}, "
-                        f"{_after_words(ranked.value)}. Not ranked while the price is held."
+                        f"{after_rin_words(ranked.value)}. Not ranked while the price is held."
                     )
                 return SectionBody(sentence, fig, READING_RIN, today)
             side = "more" if reading.value >= 0 else "less"
             sentence = (
-                f"The oil for 1 m³ of biodiesel costs {_usd(abs(reading.value), 'm³')} {side} "
-                f"than 1 m³ of heating oil, {_rank_clause(reading)}."
+                f"The oil for 1 m³ of biodiesel costs {usd(abs(reading.value), 'm³')} {side} "
+                f"than 1 m³ of heating oil, {rank_clause(reading)}."
             )
             return SectionBody(sentence, fig, READING_HISTORY["gap"], today)
         means, counts = monthly_means(table[column], flagged)
@@ -542,8 +498,8 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
         )
         # With the RIN on, the last month with EPA weeks, not the month of the latest close.
         dated = pd.Timestamp(table[column].where(~flagged).dropna().index[-1])
-        sentence = _month_sentence(
-            means, dated, reading.latest_date, lambda v: _usd(v, "m³", signed=True)
+        sentence = month_sentence(
+            means, dated, reading.latest_date, lambda v: usd(v, "m³", signed=True)
         )
         reading_text = READING_BY_MONTH
         if rin_on:
@@ -570,13 +526,13 @@ def _data_line(loaded: LoadResult) -> str:
     if loaded.prices is None or loaded.as_of is None:
         return f"{html.escape(DATA_SOURCE)}."
     freshness = " (may be out of date)" if loaded.is_stale else ""
-    day = f'<span class="cm-nowrap">{_day(pd.Timestamp(loaded.as_of))}</span>'
-    return f"{html.escape(DATA_SOURCE)}, 2000 to {day}{freshness}."
+    shown = f'<span class="cm-nowrap">{day(pd.Timestamp(loaded.as_of))}</span>'
+    return f"{html.escape(DATA_SOURCE)}, 2000 to {shown}{freshness}."
 
 
 def _footer_day(date: datetime.date) -> str:
     # The footer is markdown, which takes no span, so no-break spaces keep the date whole.
-    return _day(pd.Timestamp(date)).replace(" ", " ")
+    return day(pd.Timestamp(date)).replace(" ", " ")
 
 
 def _footer(loaded: LoadResult, rins: RinResult | None = None) -> None:

@@ -36,6 +36,8 @@ def _expected_keys(last_year: int) -> set[str]:
         for year in range(readme_figures.FIRST_YEAR, last_year + 1)
         for side in ("before", "after")
     }
+    yearly |= {f"d4_mean_{year}" for year in range(readme_figures.FIRST_YEAR, last_year + 1)}
+    yearly |= {f"oil_share_{year}" for year in range(readme_figures.FIRST_YEAR - 3, last_year + 1)}
     return yearly | {
         "data_date",
         "d4_week",
@@ -260,7 +262,22 @@ EXPECTED: dict[str, Any] = {
     "d4_week": "2026-09-21",
     "d4_usd_per_rin": 2.09,
     "d4_usd_per_m3": 829,
+    "d4_mean_2021": 1.32,
+    "d4_mean_2022": 1.6,
+    "d4_mean_2023": 1.56,
+    "d4_mean_2024": 0.76,
+    "d4_mean_2025": 0.93,
+    "d4_mean_2026": 1.68,
     "btc_usd_per_m3": 264,
+    "oil_share_2018": 31,
+    "oil_share_2019": 32,
+    "oil_share_2020": 33,
+    "oil_share_2021": 43,
+    "oil_share_2022": 45,
+    "oil_share_2023": 39,
+    "oil_share_2024": 40,
+    "oil_share_2025": 45,
+    "oil_share_2026": 51,
     "gap_before_2021": 604,
     "gap_after_2021": 85,
     "gap_before_2022": 471,
@@ -340,6 +357,12 @@ SNAPSHOT_ROWS = 6714
 # README passages built from the figures. Numbers print as the README prints them:
 # thousands separators, and a typographic minus.
 README_QUOTES = [
+    "pushed soybean oil from about a third of that product value in 2018–2020 "
+    "({oil_share_2018}% to {oil_share_2020}% a year) to {oil_share_2023}–{oil_share_2025}% "
+    "from 2021 to 2025 and {oil_share_2026}% in 2026 to date",
+    "the 2026 drop after the RIN is the D4 price: it averaged {d4_mean_2026} USD in 2026 to "
+    "date against {d4_mean_2025} USD in 2025, while the gap before the RIN moved from "
+    "{gap_before_2025:+} to {gap_before_2026:+} USD/m³",
     "The last EPA week is {d4_week}, with the D4 RIN at {d4_usd_per_rin} USD: "
     "about {d4_usd_per_m3:,} USD per m³ of biodiesel",
     *(
@@ -444,6 +467,14 @@ def test_readme_claims_hold_on_the_snapshot() -> None:
     assert EXPECTED["risk_combined_var_usd"] < EXPECTED["risk_var_usd"]
     assert EXPECTED["risk_es_christoffersen_p"] < 0.05 <= EXPECTED["risk_christoffersen_p"]
     assert EXPECTED["risk_z2_p"] >= 0.05
+    # "39–45% from 2021 to 2025": the range's ends are that span's lowest and highest years.
+    span = [EXPECTED[f"oil_share_{year}"] for year in range(2021, 2026)]
+    assert (min(span), max(span)) == (EXPECTED["oil_share_2023"], EXPECTED["oil_share_2025"])
+    # "Most of the 2026 drop after the RIN is the D4 price".
+    after = EXPECTED["gap_after_2026"] - EXPECTED["gap_after_2025"]
+    before = EXPECTED["gap_before_2026"] - EXPECTED["gap_before_2025"]
+    assert after < 0 and abs(before) < abs(after) / 10
+    assert EXPECTED["d4_mean_2026"] > EXPECTED["d4_mean_2025"]
 
 
 def test_a_changed_figure_is_caught() -> None:
