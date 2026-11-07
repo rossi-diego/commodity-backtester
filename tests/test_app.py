@@ -17,6 +17,7 @@ from streamlit.testing.v1 import AppTest
 from scripts import readme_figures
 from src import config, visualization
 from src.data_loader import read_snapshot
+from src.deferred import Held
 from src.margins import RIN_TOLERANCE, break_even_d4, crush_table, gap_table
 from src.rins import RinResult
 from src.seasonal import latest_reading
@@ -501,7 +502,30 @@ class TestDataStates:
             for key in SECTIONS:
                 at.button_group(key=f"view-{key}").set_value("By month").run()
         _no_exceptions(at)
-        assert re.search(r"12 Nov close \$\d+/t, roll day", _kpis(at))
+        assert "In delivery since 31 Oct" in _kpis(at)
+        st.cache_data.clear()
+
+    def test_in_delivery_the_page_shows_the_held_contracts(self, tmp_path, monkeypatch) -> None:
+        """The same frame with the held contracts fetched: today's level, named and ranked."""
+        dates = pd.bdate_range("2019-01-02", "2025-11-12")
+        levels = {"Soybean": 1000.0, "Soybean Meal": 320.0, "Soybean Oil": 45.0, "Heating Oil": 2.6}
+        frame = pd.DataFrame(levels, index=dates)
+        held_prices = pd.Series(levels | {"Soybean": 990.0}, name=dates[-1])
+        held = Held(date=dates[-1], prices=held_prices, beans="Jan", products="Dec")
+        monkeypatch.setattr("src.deferred.held_session", lambda prices, fetcher=None: held)
+        expected = crush_table(pd.DataFrame([held_prices], index=[dates[-1]]))["crush"].iloc[0]
+        at = _cached_app(monkeypatch, tmp_path, frame)
+        with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
+            at.run()
+        _no_exceptions(at)
+        kpis = _kpis(at)
+        assert "Jan beans / Dec products" in kpis
+        assert f"${expected:,.0f}/t" in kpis
+        assert "12 Nov 2025" in kpis
+        assert "In delivery" not in kpis
+        page = _html(at)
+        assert "<h3>Levels on 12 Nov</h3>" in page
+        assert "(Jan beans / Dec products), higher than" in page
         st.cache_data.clear()
 
 

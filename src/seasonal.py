@@ -20,6 +20,7 @@ __all__ = [
     "monthly_band",
     "monthly_means",
     "range_52w",
+    "reading_at",
     "yearly_means",
 ]
 
@@ -78,6 +79,30 @@ def latest_reading(
         percentile=percentile,
         latest_date=pd.Timestamp(values.index[-1]),
         sessions=len(window),
+    )
+
+
+def reading_at(
+    values: pd.Series, flagged: pd.Series, date: pd.Timestamp, value: float
+) -> Reading | None:
+    """A reading of ``value`` on ``date``, ranked against the clean history before it.
+
+    For a level the history does not hold, such as the held contracts on a session the
+    ``=F`` series spends in delivery: it is ranked, but joins nothing it is ranked against.
+    """
+    point = pd.Series([value], index=pd.DatetimeIndex([date]))
+    series = pd.concat([values[values.index != date], point]).sort_index()
+    flags = pd.concat([flagged[flagged.index != date], pd.Series([False], index=point.index)])
+    unranked = pd.Series(series.index == date, index=series.index)
+    reading = latest_reading(series.loc[:date], flags.sort_index().loc[:date], unranked)
+    if reading is None:  # pragma: no cover - the point itself is clean
+        return None
+    return Reading(
+        value=reading.value,
+        date=reading.date,
+        percentile=reading.percentile,
+        latest_date=pd.Timestamp(values.index[-1]),
+        sessions=reading.sessions,
     )
 
 

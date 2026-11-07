@@ -14,6 +14,12 @@ from src.constants import BEANS, DIESEL, MEAL, OIL
 LEVELS = {BEANS: 1000.0, MEAL: 320.0, OIL: 45.0, DIESEL: 2.6}
 
 
+@pytest.fixture(autouse=True)
+def _no_held_contracts(monkeypatch) -> None:
+    """The page never fetches held contracts in tests unless a test says so: no network."""
+    monkeypatch.setattr("src.deferred.held_session", lambda prices, fetcher=None: None)
+
+
 @pytest.fixture(scope="session")
 def synthetic_prices() -> pd.DataFrame:
     """Four-leg frame shaped like the real cache: 2000 to today, with isolated gaps.

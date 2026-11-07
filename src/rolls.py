@@ -33,10 +33,13 @@ __all__ = [
     "crush_switches",
     "front_contracts",
     "gap_flags",
+    "held_contract",
     "grain_first_notice",
     "grain_last_trade",
     "monthly_last_trade",
+    "month_name",
     "off_pair",
+    "yahoo_ticker",
 ]
 
 BEAN_MONTHS = (1, 3, 5, 7, 8, 9, 11)
@@ -44,6 +47,8 @@ PRODUCT_MONTHS = (1, 3, 5, 7, 8, 9, 10, 12)
 DIESEL_MONTHS = tuple(range(1, 13))
 # The CME board crush pair: bean front month -> product front month.
 BOARD_PAIRS: Final[dict[int, int]] = {1: 1, 3: 3, 5: 5, 7: 7, 8: 8, 9: 9, 11: 12}
+# Exchange month codes, as in ZSF27: F is January.
+MONTH_CODES: Final[str] = "FGHJKMNQUVXZ"
 
 
 def grain_last_trade(year: int, month: int) -> pd.Timestamp:
@@ -142,3 +147,26 @@ def gap_flags(dates: pd.DatetimeIndex) -> pd.Series:
     diesel = front_contracts(dates, DIESEL_MONTHS, monthly_last_trade)
     flagged = oil["delivery"] | oil["switch"] | _switched(diesel)
     return flagged.rename("flagged")
+
+
+def held_contract(date: pd.Timestamp, months: tuple[int, ...]) -> tuple[int, int]:
+    """The contract a trader who never takes delivery holds on ``date``: year and month.
+
+    It is the first whose first notice day is after ``date``, so on first notice day itself
+    the trader is already in the next one. Outside delivery it is the ``=F`` front month.
+    """
+    day = pd.Timestamp(date).normalize()
+    for year in range(day.year, day.year + 2):
+        for month in sorted(months):
+            if day < grain_first_notice(year, month):
+                return year, month
+    raise ValueError(f"no contract after {day.date()}")  # pragma: no cover
+
+
+def yahoo_ticker(root: str, year: int, month: int) -> str:
+    """Yahoo's symbol for one CBOT contract: ``yahoo_ticker("ZS", 2027, 1)`` is ZSF27.CBT."""
+    return f"{root}{MONTH_CODES[month - 1]}{year % 100:02d}.CBT"
+
+
+def month_name(month: int) -> str:
+    return pd.Timestamp(2000, month, 1).strftime("%b")

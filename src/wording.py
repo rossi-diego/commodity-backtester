@@ -17,7 +17,7 @@ from .visualization import MONTHS
 __all__ = [
     "after_rin_words",
     "day",
-    "latest_close_tag",
+    "delivery_tag",
     "month_sentence",
     "previous_years",
     "rank_clause",
@@ -69,12 +69,9 @@ def rin_note(rins: RinResult, latest: pd.Timestamp) -> str:
     return f"D4 week of {week.day} {week:%b} (EPA{saved}, {weeks} weeks old). "
 
 
-def latest_close_tag(reading: Reading, latest_value: float) -> str:
-    """The flagged close after the last clean one, shown beside the value but not ranked."""
-    if reading.date == reading.latest_date:
-        return ""
-    when = reading.latest_date
-    return f"{when.day} {when:%b} close {usd(latest_value, 't')}, roll day"
+def delivery_tag(since: pd.Timestamp) -> str:
+    """Why the value is older than the data: the sessions after it are in delivery."""
+    return f"In delivery since {since.day} {since:%b}"
 
 
 def month_sentence(
