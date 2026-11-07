@@ -8,60 +8,19 @@ through ``html.escape``; markup arguments come only from this module.
 from __future__ import annotations
 
 import html
-import math
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final, Literal
-
-import pandas as pd
-
-from .risk import (
-    ES_LEVEL,
-    MIN_CHANGES,
-    NOTIONAL_TONNES,
-    VAR_LEVEL,
-    Backtest,
-    RiskSummary,
-    percent_shares,
-)
-from .seasonal import LOOKBACK_YEARS
-from .wording import day
 
 __all__ = [
-    "BACKTEST_SIGNIFICANCE",
-    "VERDICT_CLASS",
     "Kpi",
     "MethodCard",
-    "RiskCopy",
-    "Verdict",
-    "backtest_line",
-    "backtest_verdict",
-    "es_backtest_line",
-    "es_check_line",
-    "es_verdict",
     "kpi_row_html",
     "method_row_html",
     "ordinal",
     "percentile_html",
     "rail_html",
-    "risk_effect",
-    "risk_strip_html",
     "section_head_html",
     "split_bar_html",
-    "var_check_line",
-    "worst_line",
 ]
-
-# A p-value under this rejects the VaR: too many or too few exceptions, or clusters.
-BACKTEST_SIGNIFICANCE: Final = 0.05
-
-Verdict = Literal["Holds", "Under-covers", "Over-conservative", "Clusters"]
-VERDICT_CLASS: Final[dict[Verdict, str]] = {
-    "Holds": "cm-chip-pass",
-    "Under-covers": "cm-chip-fail",
-    "Clusters": "cm-chip-fail",
-    "Over-conservative": "cm-chip-over",
-}
 
 
 @dataclass(frozen=True)
@@ -91,27 +50,6 @@ class MethodCard:
     title: str
     entries: tuple[tuple[str, str], ...]
     closing: str
-
-
-@dataclass(frozen=True)
-class RiskCopy:
-    """The risk strip's copy, from ``src.text``: templates filled by this module.
-
-    ``note`` takes an ``{effect}``, one of ``effects`` keyed lower, raise or none. The checks
-    take a ``{verdict}`` in words, and each chip its label, keyed by ``Verdict``.
-    """
-
-    note: str
-    effects: Mapping[str, str]
-    var_check: str
-    var_verdict: Mapping[str, str]
-    es_check: str
-    es_verdict: Mapping[str, str]
-    chips: Mapping[str, str]
-    worst: str
-    method: str
-    var_test: str
-    es_test: str
 
 
 def ordinal(value: float) -> str:
@@ -188,179 +126,6 @@ def rail_html(what: str, reading: str, today: list[tuple[str, str]], title: str 
         f"<div><h3>Reading the chart</h3><p>{html.escape(reading)}</p></div>"
         f'<div class="cm-today"><h3>{html.escape(title)}</h3><dl>{rows}</dl></div></div>'
     )
-
-
-def _signed_percent(shown: int) -> str:
-    # A typographic minus, as in the page's USD values.
-    sign = "−" if shown < 0 else ("+" if shown > 0 else "")
-    return f"{sign}{abs(shown)}%"
-
-
-def _dollars(value: float) -> str:
-    return f"{'−' if round(value) < 0 else ''}${abs(value):,.0f}"
-
-
-def _p_value(p: float) -> str:
-    # A no-break space, so "< 0.01" never splits across lines.
-    return "<\N{NO-BREAK SPACE}0.01" if p < 0.01 else f"{p:.2f}"
-
-
-def backtest_verdict(test: Backtest) -> Verdict:
-    """What the VaR backtest says, Kupiec's coverage first, then independence."""
-    if test.kupiec_p < BACKTEST_SIGNIFICANCE and test.rate > 1 - VAR_LEVEL:
-        return "Under-covers"
-    if test.kupiec_p < BACKTEST_SIGNIFICANCE and test.rate < 1 - VAR_LEVEL:
-        return "Over-conservative"
-    if test.christoffersen_p < BACKTEST_SIGNIFICANCE:
-        return "Clusters"
-    return "Holds"
-
-
-def es_verdict(test: Backtest) -> Verdict:
-    """What the ES backtest says, Acerbi-Szekely first, then independence, as for the VaR."""
-    if test.z2_p < BACKTEST_SIGNIFICANCE:
-        return "Under-covers"
-    if test.es_christoffersen_p < BACKTEST_SIGNIFICANCE:
-        return "Clusters"
-    return "Holds"
-
-
-def _chip(verdict: Verdict, labels: Mapping[str, str]) -> str:
-    return f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{html.escape(labels[verdict])}</span>'
-
-
-def backtest_line(test: Backtest, template: str) -> str:
-    """The backtest sentence as plain text, filled only from ``test`` and the risk constants."""
-    return template.format(
-        years=LOOKBACK_YEARS,
-        exceptions=test.exceptions,
-        days=test.days,
-        rate=test.rate,
-        expected=1 - VAR_LEVEL,
-        kupiec=_p_value(test.kupiec_p),
-        independence=_p_value(test.christoffersen_p),
-    )
-
-
-def var_check_line(test: Backtest, copy: RiskCopy) -> str:
-    """The VaR backtest in words, for a reader who does not know the tests."""
-    return copy.var_check.format(
-        years=LOOKBACK_YEARS,
-        exceptions=test.exceptions,
-        days=test.days,
-        rate=test.rate,
-        verdict=copy.var_verdict[backtest_verdict(test)],
-    )
-
-
-def es_check_line(test: Backtest, copy: RiskCopy) -> str:
-    """The ES backtest in words."""
-    return copy.es_check.format(verdict=copy.es_verdict[es_verdict(test)])
-
-
-def es_backtest_line(test: Backtest, template: str) -> str:
-    """The ES backtest sentence as plain text, filled only from ``test`` and the constants."""
-    return template.format(
-        years=LOOKBACK_YEARS,
-        exceptions=test.es_exceptions,
-        days=test.days,
-        level=ES_LEVEL,
-        rate=test.es_rate,
-        expected=1 - ES_LEVEL,
-        severity="n/a" if math.isnan(test.es_ratio) else f"{test.es_ratio:.2f}× ES",
-        z2p=_p_value(test.z2_p),
-        independence=_p_value(test.es_christoffersen_p),
-    )
-
-
-def worst_line(worst: tuple[tuple[pd.Timestamp, float], ...], template: str) -> str:
-    """The largest clean losses of the window as plain text, worst first.
-
-    Each loss and its date stay on one line: no-break spaces inside the item, and a word
-    joiner after the minus, which a browser would otherwise break after.
-    """
-    days = ", ".join(
-        f"{_dollars(loss)} ({day(date)})".replace("−", "−\N{WORD JOINER}").replace(
-            " ", "\N{NO-BREAK SPACE}"
-        )
-        for date, loss in worst
-    )
-    return template.format(years=LOOKBACK_YEARS, tonnes=NOTIONAL_TONNES, days=days)
-
-
-def risk_effect(summary: RiskSummary | None) -> str:
-    """Whether the left-out roll and delivery changes would lower or raise the VaR."""
-    if summary is None or summary.bias is None:
-        return "none"
-    if summary.bias.combined_var < summary.var:
-        return "lower"
-    # A NaN combined VaR, from too few changes, compares false both ways.
-    return "raise" if summary.bias.combined_var > summary.var else "none"
-
-
-def risk_strip_html(summary: RiskSummary | None, copy: RiskCopy) -> str:
-    """The 1-day risk of the crush under its chart, in two layers.
-
-    Four cells and plain lines for any reader: each check after a chip with its verdict, the
-    worst clean days and a note. Then the model and the test statistics behind a
-    ``<details>`` for a risk reader.
-    """
-    note = copy.note.format(effect=copy.effects[risk_effect(summary)])
-    if summary is None:
-        footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
-        line = f"n/a: under {MIN_CHANGES} clean daily changes"
-        return f'<div class="cm-risk"><p class="cm-risk-na">{html.escape(line)}</p>{footer}</div>'
-    plain: list[tuple[str, str]] = []
-    details = [copy.method.format(date=day(summary.date))]
-    test = summary.backtest
-    if test is not None:
-        plain += [
-            (_chip(backtest_verdict(test), copy.chips), var_check_line(test, copy)),
-            (_chip(es_verdict(test), copy.chips), es_check_line(test, copy)),
-        ]
-        details += [backtest_line(test, copy.var_test), es_backtest_line(test, copy.es_test)]
-    if summary.worst:
-        plain.append(("", worst_line(summary.worst, copy.worst)))
-    footer = "".join(
-        f'<p class="cm-risk-test">{chip + " " if chip else ""}{html.escape(text)}</p>'
-        for chip, text in plain
-    )
-    footer += f'<p class="cm-risk-note">{html.escape(note)}</p>'
-    footer += (
-        '<details class="cm-risk-more"><summary>Model and tests</summary>'
-        + "".join(f"<p>{html.escape(text)}</p>" for text in details)
-        + "</details>"
-    )
-    # Each leg stays on one line and the legs wrap as a flex row, spaced by the CSS gap, so a
-    # narrow cell breaks only between legs and no line ends on a separator.
-    legs = (
-        '<span class="cm-legs">'
-        + "".join(
-            f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
-            for leg, share in percent_shares(summary.contributions).items()
-        )
-        + "</span>"
-    )
-    cells = [
-        (
-            "Typical daily move: recent / past year",
-            html.escape(f"${summary.vol_20:,.2f}/t / ${summary.vol_1y:,.2f}/t"),
-        ),
-        (
-            f"Loss on 1 day in {round(1 / (1 - VAR_LEVEL))}, {NOTIONAL_TONNES:,} t",
-            html.escape(_dollars(summary.var)),
-        ),
-        (
-            f"Worst 1 day in {round(1 / (1 - ES_LEVEL))}, average",
-            html.escape(_dollars(summary.es)),
-        ),
-        ("Where the worst-day loss comes from", legs),
-    ]
-    rows = "".join(
-        f'<div class="cm-risk-cell"><dt>{html.escape(label)}</dt><dd>{value}</dd></div>'
-        for label, value in cells
-    )
-    return f'<div class="cm-risk"><dl>{rows}</dl>{footer}</div>'
 
 
 def method_row_html(cards: list[MethodCard]) -> str:

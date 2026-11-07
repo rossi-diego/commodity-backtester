@@ -24,15 +24,6 @@ def test_selected_toggle_knob_is_dark() -> None:
     assert "--page:#0b1016" in APP_CSS
 
 
-def test_legs_wrap_as_a_flex_row() -> None:
-    assert ".cm-legs{display:flex;flex-wrap:wrap;gap:0 .75rem}" in APP_CSS
-    assert ".cm-leg{white-space:nowrap}" in APP_CSS
-
-
-def test_over_conservative_chip_is_legible() -> None:
-    assert ".cm-chip-over{border-style:dashed;color:var(--mut)}" in APP_CSS
-
-
 class TestYearPills:
     def test_newest_pill_takes_last_years_colour(self) -> None:
         rules = year_pill_css(YEAR_COLORS).splitlines()

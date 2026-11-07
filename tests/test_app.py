@@ -16,13 +16,11 @@ from streamlit.testing.v1 import AppTest
 
 from scripts import readme_figures
 from src import config, visualization
-from src.cards import risk_strip_html
 from src.data_loader import read_snapshot
 from src.margins import RIN_TOLERANCE, break_even_d4, crush_table, gap_table
 from src.rins import RinResult
-from src.risk import risk_summary
 from src.seasonal import latest_reading
-from src.text import GAP_CARD, RISK_STRIP
+from src.text import GAP_CARD
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -257,23 +255,6 @@ class TestFirstLoad:
             assert text in hero
         assert not app.warning
 
-    def test_risk_strip_matches_the_engine(self, app, synthetic_prices) -> None:
-        app.run()
-        _no_exceptions(app)
-        summary = risk_summary(crush_table(synthetic_prices))
-        assert summary is not None
-        strip = _block(app, 'class="cm-risk"')
-        assert strip == risk_strip_html(summary, RISK_STRIP)
-        assert strip.count('class="cm-risk-cell"') == 4
-        assert summary.backtest is not None
-        assert summary.worst
-        # The VaR test, the ES test and the worst clean days.
-        assert strip.count('class="cm-risk-test"') == 3
-        assert strip.index('class="cm-risk-test"') > strip.index("</dl>")
-        assert strip.index('class="cm-risk-test"') < strip.index('class="cm-risk-note"')
-        assert f"${summary.var:,.0f}" in strip
-        assert _html(app).count('class="cm-risk"') == 1
-
     def test_footer_dates_the_data_and_disclaims(self, app, synthetic_prices) -> None:
         app.run()
         footer = app.caption[-1].value
@@ -507,18 +488,6 @@ class TestDataStates:
         ]
         st.cache_data.clear()
 
-    def test_short_history_has_no_risk_numbers(
-        self, tmp_path, monkeypatch, synthetic_prices
-    ) -> None:
-        at = _cached_app(monkeypatch, tmp_path, synthetic_prices.iloc[-200:])
-        with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
-            at.run()
-        _no_exceptions(at)
-        strip = _block(at, 'class="cm-risk"')
-        assert "n/a: under 250 clean daily changes" in strip
-        assert "cm-risk-cell" not in strip
-        st.cache_data.clear()
-
     def test_card_says_when_the_latest_close_is_flagged(self, tmp_path, monkeypatch) -> None:
         """A frame ending inside November delivery: the reading uses an earlier clean date."""
         dates = pd.bdate_range("2019-01-02", "2025-11-12")
@@ -607,11 +576,7 @@ class TestSource:
         phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
         assert "[class*='st-key-bar-'] [data-testid='stButtonGroup']" in phone
 
-    def test_risk_grid_is_two_by_two_on_a_phone(self) -> None:
-        phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
-        assert ".cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}" in phone
-        assert ".cm-risk-cell:first-child,.cm-risk-cell:last-child{grid-column:1/-1}" in phone
-        assert ".cm-leg{white-space:nowrap}" in CSS
+    def test_dates_never_break(self) -> None:
         assert ".cm-nowrap{white-space:nowrap}" in CSS
 
 
@@ -631,10 +596,7 @@ class TestDarkTheme:
             theme = tomllib.load(file)["theme"]
         assert theme["primaryColor"] != tokens["crush"]
         rules = [line for line in CSS.splitlines() if "var(--crush)" in line]
-        # The one exception is a failed VaR backtest, flagged in the crush strip without red.
-        assert rules and all(line.startswith((".cm-kpi-crush", ".cm-chip-fail")) for line in rules)
-        risk = [line for line in CSS.splitlines() if ".cm-risk" in line]
-        assert risk and not any("--crush" in line for line in risk)
+        assert rules and all(line.startswith(".cm-kpi-crush") for line in rules)
 
     @pytest.mark.parametrize(
         ("text", "surface"),

@@ -12,7 +12,6 @@ __all__ = ["APP_CSS", "year_pill_css"]
 # The rules target Streamlit test ids and key classes, so redo the screenshots when upgrading.
 # The top padding clears the 56 px bar Streamlit Cloud draws over the app from its parent page,
 # the bottom padding its floating badge, which covered the last card on a phone.
-# The risk strip labels keep their case: uppercase would turn σ into Σ.
 # In Streamlit 1.66 stButtonGroup is a block; the row of chips is its child div, so wrap that.
 # Its element container shrinks to the chips, so the view switch moves right by its margin.
 # The D4 toggle's track is the near-white primary colour when on, and so is its knob (the
@@ -75,23 +74,6 @@ _BASE_CSS: Final[str] = """
 .cm-today dl{display:grid;grid-template-columns:1fr auto;gap:.25rem .75rem;margin:0;padding:0}
 .cm-today dt{margin:0;padding:0;color:var(--mut)}
 .cm-today dd{margin:0;padding:0;text-align:right;font-variant-numeric:tabular-nums}
-.cm-risk{border-top:1px solid var(--line);padding-top:.75rem;color:var(--ink)}
-.cm-risk dl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem 1.25rem;margin:0;padding:0}
-.cm-risk-cell{min-width:0}
-.cm-risk dt{margin:0 0 .2rem;padding:0;font-size:.75rem;font-weight:500;color:var(--mut)}
-.cm-risk dd{margin:0;padding:0;font-size:.9375rem;font-weight:600;font-variant-numeric:tabular-nums}
-.cm-risk-na{margin:0;font-size:.875rem;color:var(--mut)}
-.cm-legs{display:flex;flex-wrap:wrap;gap:0 .75rem}
-.cm-leg{white-space:nowrap}
-.cm-risk-test{margin:.6rem 0 0;font-size:.8125rem;line-height:1.4;color:var(--ink)}
-.cm-chip{display:inline-block;font-size:.6875rem;font-weight:600;letter-spacing:.03em;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--line);margin-right:.4rem;vertical-align:1px}
-.cm-chip-fail{border-color:var(--crush);color:var(--crush)}
-.cm-chip-pass{color:var(--mut)}
-.cm-chip-over{border-style:dashed;color:var(--mut)}
-.cm-risk-note{margin:.6rem 0 0;font-size:.78rem;line-height:1.35;color:var(--mut)}
-.cm-risk-more{margin:.5rem 0 0;font-size:.78rem;line-height:1.4;color:var(--mut)}
-.cm-risk-more summary{cursor:pointer;width:fit-content;color:var(--ink);font-weight:500}
-.cm-risk-more p{margin:.35rem 0 0}
 .cm-method{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .cm-method section{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--line);border-radius:10px;padding:.9rem 1rem}
 .cm-method h2{font-size:.9375rem;font-weight:600;margin:0 0 .5rem;padding:0;color:var(--ink)}
@@ -116,7 +98,6 @@ _BASE_CSS: Final[str] = """
  .cm-value{font-size:1.625rem}
 }
 @media (max-width:1023px){
- .cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:760px){
  .cm-kpis{grid-template-columns:1fr;grid-template-rows:none;gap:12px}
@@ -132,8 +113,6 @@ _BASE_CSS: Final[str] = """
  .cm-q{font-size:1rem}
  .cm-steps{display:none}
  [class*='st-key-card-sec']{padding:.7rem .8rem}
- .cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}
- .cm-risk-cell:first-child,.cm-risk-cell:last-child{grid-column:1/-1}
  [data-testid='stPlotlyChart'] .nsewdrag{pointer-events:none}
  [data-testid='stPlotlyChart'] .modebar-container{display:none}
 }
