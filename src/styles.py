@@ -89,6 +89,9 @@ _BASE_CSS: Final[str] = """
 .cm-chip-pass{color:var(--mut)}
 .cm-chip-over{border-style:dashed;color:var(--mut)}
 .cm-risk-note{margin:.6rem 0 0;font-size:.78rem;line-height:1.35;color:var(--mut)}
+.cm-risk-more{margin:.5rem 0 0;font-size:.78rem;line-height:1.4;color:var(--mut)}
+.cm-risk-more summary{cursor:pointer;width:fit-content;color:var(--ink);font-weight:500}
+.cm-risk-more p{margin:.35rem 0 0}
 .cm-method{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .cm-method section{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--line);border-radius:10px;padding:.9rem 1rem}
 .cm-method h2{font-size:.9375rem;font-weight:600;margin:0 0 .5rem;padding:0;color:var(--ink)}

@@ -23,7 +23,7 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
 | 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
 | 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
-| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over the last 20 clean changes and 1 year, 1-day VaR 95% and ES 97.5% (filtered historical simulation, backtested) on a 1,000 t crusher's margin, unhedged, and each leg's share of the ES | USD per tonne and USD |
+| Risk: how much can a crush position move in a day? | A block under the crush chart, in plain words: the typical daily move, the loss on 1 day in 20 (VaR 95%) and the average loss on the worst 1 day in 40 (ES 97.5%) on a 1,000 t crusher's margin, unhedged, where that loss comes from, and whether the past 5 years bear the figures out. The model and the test statistics sit behind "Model and tests" | USD per tonne and USD |
 
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
@@ -138,7 +138,7 @@ Backtest from 2021-11-17 to 2026-10-29, at 95%:
 | Filtered HS (shown) | 685 | 33 | 4.8% | 0.83 | 0.29 |
 | Plain HS, same window | 685 | 65 | 9.5% | <0.001 | <0.001 |
 
-Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version. The page states its backtest in one line under the four risk cells, after a chip. The chip reads "Holds" when both p-values are 0.05 or more; "Under-covers" or "Over-conservative" when Kupiec rejects with too many or too few exceptions; and "Clusters" when only the independence test rejects.
+Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version. Under the four risk cells, the page states the backtest in words after a chip: "Checks out" when both p-values are 0.05 or more; "Too low" or "Too high" when Kupiec rejects with too many or too few exceptions; and "Bunched" when only the independence test rejects. The statistics themselves are behind "Model and tests".
 
 ES backtest at 97.5%, on the same days:
 
@@ -146,7 +146,7 @@ ES backtest at 97.5%, on the same days:
 |---:|---:|---:|---:|---:|---:|---:|---:|
 | 685 | 14 | 2.0% | 0.43 | 0.03 | 0.97 | 0.20 | 0.84 |
 
-Mean loss / ES is the average loss on an exception day over that day's ES forecast. The published −0.70 critical value of Z2 is for 250 days, so the p-value is simulated: 2,000 samples, each drawing every day's outcome from that day's own scenarios, with a fixed seed. A second line on the page states this test, after its own chip. The ES chip follows the same order: "Under-covers" when the simulated Acerbi–Szekely p is below 0.05, "Clusters" when only the independence test of the 97.5% exceptions rejects, and "Holds" otherwise. On this sample it reads "Clusters".
+Mean loss / ES is the average loss on an exception day over that day's ES forecast. The published −0.70 critical value of Z2 is for 250 days, so the p-value is simulated: 2,000 samples, each drawing every day's outcome from that day's own scenarios, with a fixed seed. A second line on the page states this test in words, after its own chip, in the same order: "Too low" when the simulated Acerbi–Szekely p is below 0.05, "Bunched" when only the independence test of the 97.5% exceptions rejects, and "Checks out" otherwise. On this sample it reads "Bunched".
 
 At 97.5%, 2 of the 14 exceptions fall on the clean change right after another exception, so independence is rejected at that level (p 0.03); the 95% exceptions do not cluster (p 0.29).
 

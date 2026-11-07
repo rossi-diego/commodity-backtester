@@ -28,7 +28,16 @@ from src.cards import (
     worst_line,
 )
 from src.risk import Backtest, RiskSummary, SampleBias, kupiec_pof
-from src.text import BACKTEST_LINE, ES_BACKTEST_LINE, RISK_EFFECT, RISK_STRIP, WORST_LINE
+from src.text import (
+    BACKTEST_LINE,
+    CHIP_LABEL,
+    ES_BACKTEST_LINE,
+    ES_VERDICT,
+    RISK_EFFECT,
+    RISK_STRIP,
+    VAR_VERDICT,
+    WORST_LINE,
+)
 
 NB = "\N{NO-BREAK SPACE}"
 WJ = "\N{WORD JOINER}"
@@ -172,13 +181,13 @@ class TestRiskStrip:
 
     def test_four_cells_with_signed_leg_shares(self) -> None:
         markup = risk_strip_html(self._summary(), _copy())
-        assert "Share of ES by leg" in markup
+        assert "Where the worst-day loss comes from" in markup
         assert markup.count('class="cm-risk-cell"') == 4
         assert "<dd>$4.57/t / $5.00/t</dd>" in markup
-        assert "Daily σ, last 20 changes / 1 year" in markup
+        assert "Typical daily move: recent / past year" in markup
         assert "sessions" not in markup
-        assert "1-day VaR 95%, 1,000 t</dt><dd>$8,123</dd>" in markup
-        assert "ES 97.5%</dt><dd>$11,235</dd>" in markup
+        assert "Loss on 1 day in 20, 1,000 t</dt><dd>$8,123</dd>" in markup
+        assert "Worst 1 day in 40, average</dt><dd>$11,235</dd>" in markup
         legs = re.search(r'<span class="cm-legs">.*?</span></dd>', markup)
         assert legs is not None
         assert "·" not in legs.group()
@@ -194,15 +203,17 @@ class TestRiskStrip:
         )
         assert expected in markup
 
-    def test_note_starts_with_the_as_of_date(self) -> None:
+    def test_the_model_and_its_date_sit_behind_details(self) -> None:
         summary = self._summary(date=pd.Timestamp("2026-10-09"))
         markup = risk_strip_html(summary, _copy("Note."))
-        expected = '<p class="cm-risk-note">As of 9 Oct 2026, the last clean change. Note.</p>'
-        assert expected in markup
+        assert '<p class="cm-risk-note">Note.</p><details class="cm-risk-more">' in markup
+        assert "<summary>Model and tests</summary><p>Filtered historical simulation" in markup
+        assert "in the 5 years to 9 Oct 2026 is divided" in markup
+        assert markup.endswith("</details></div>")
 
     def test_text_is_escaped(self) -> None:
         markup = risk_strip_html(self._summary(), _copy("a < b & c"))
-        assert "the last clean change. a &lt; b &amp; c</p>" in markup
+        assert '<p class="cm-risk-note">a &lt; b &amp; c</p>' in markup
         assert "a < b" not in markup
 
     def test_no_summary_is_one_line(self) -> None:
@@ -228,12 +239,12 @@ class TestRiskNote:
         summary = TestRiskStrip()._summary(bias=replace(BIAS, combined_var=combined))
         assert risk_effect(summary) == effect
         markup = risk_strip_html(summary, RISK_STRIP)
-        assert f"are left out; {RISK_EFFECT[effect]}. Crusher&#x27;s margin" in markup
+        assert f"are left out; {RISK_EFFECT[effect]}.</p>" in markup
 
     def test_no_bias_or_no_summary_is_none(self) -> None:
         assert risk_effect(None) == "none"
         assert risk_effect(TestRiskStrip()._summary()) == "none"
-        assert "too few to test" in risk_strip_html(None, RISK_STRIP)
+        assert "too few to test their effect" in risk_strip_html(None, RISK_STRIP)
         assert "{effect}" not in risk_strip_html(None, RISK_STRIP)
 
 
@@ -242,22 +253,22 @@ class TestWorstLine:
         summary = TestRiskStrip()._summary(backtest=BACKTEST, worst=WORST)
         markup = risk_strip_html(summary, RISK_STRIP)
         expected = (
-            '<p class="cm-risk-test">Worst clean days, 5 years, 1,000 t: −$11,743 (26 Jul 2023), '
+            '<p class="cm-risk-test">Worst days in 5 years, on 1,000 t: −$11,743 (26 Jul 2023), '
             '−$10,079 (23 Mar 2023), −$10,035 (5 Jun 2026).</p><p class="cm-risk-note">'
         )
         assert expected in _plain(markup)
         assert markup.count('class="cm-risk-test"') == 3
-        assert markup.index("ES backtest") < markup.index("Worst clean days")
+        assert markup.index("On the worst 1 day in 40") < markup.index("Worst days in")
         assert markup.count('class="cm-risk-cell"') == 4
 
     def test_no_worst_day_no_line(self) -> None:
         markup = risk_strip_html(TestRiskStrip()._summary(backtest=BACKTEST), RISK_STRIP)
-        assert "Worst" not in markup
+        assert "Worst days in" not in markup
         assert markup.count('class="cm-risk-test"') == 2
 
     def test_the_line_is_built_from_the_days(self) -> None:
         line = worst_line(WORST[:1], WORST_LINE)
-        assert _plain(line) == "Worst clean days, 5 years, 1,000 t: −$11,743 (26 Jul 2023)."
+        assert _plain(line) == "Worst days in 5 years, on 1,000 t: −$11,743 (26 Jul 2023)."
 
     def test_each_day_stays_on_one_line(self) -> None:
         """Lines break only between the days: never after the minus or inside the date."""
@@ -285,13 +296,19 @@ class TestBacktestLine:
         return risk_strip_html(summary, _copy("Note.", template))
 
     def test_a_passing_backtest_holds(self) -> None:
-        expected = (
-            '</dl><p class="cm-risk-test"><span class="cm-chip cm-chip-pass">Holds</span> '
-            "Backtest, 5 years: 33 of 685 changes beyond the VaR (4.8%, 5% expected); "
-            f'Kupiec{NB}p{NB}0.83, independence{NB}p{NB}0.29.</p><p class="cm-risk-test">'
+        plain = (
+            '</dl><p class="cm-risk-test"><span class="cm-chip cm-chip-pass">Checks out</span> '
+            "Checked on the past 5 years: losses passed the 1-in-20 level on 33 of 685 days "
+            '(4.8%), in line with 1 day in 20.</p><p class="cm-risk-test">'
+        )
+        detail = (
+            "<p>VaR 95% backtest: 33 of 685 changes beyond the VaR (4.8%, 5% expected); "
+            f"Kupiec{NB}p{NB}0.83, independence{NB}p{NB}0.29.</p>"
         )
         markup = self._strip(BACKTEST)
-        assert expected in markup
+        assert plain in markup
+        assert detail in markup
+        assert markup.index(detail) > markup.index("<details")
         assert markup.count("cm-risk-test") == 2
         assert markup.count('class="cm-risk-cell"') == 4
 
@@ -308,8 +325,10 @@ class TestBacktestLine:
     )
     def test_each_verdict(self, test, verdict) -> None:
         assert backtest_verdict(test) == verdict
-        chip = f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{verdict}</span> Backtest,'
-        assert chip in self._strip(test)
+        chip = f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{CHIP_LABEL[verdict]}</span>'
+        markup = self._strip(test)
+        assert f"{chip} Checked on" in markup
+        assert f", {VAR_VERDICT[verdict]}.</p>" in markup
 
     def test_verdict_classes(self) -> None:
         assert VERDICT_CLASS == {
@@ -349,12 +368,12 @@ class TestBacktestLine:
         markup = self._strip(None)
         assert "cm-risk-test" not in markup
         assert "cm-chip" not in markup
-        assert "Backtest" not in markup
-        assert "ES backtest" not in markup
+        assert "backtest" not in markup
+        assert "Checked on" not in markup
 
     def test_line_is_escaped(self) -> None:
         markup = self._strip(BACKTEST, "<b>{exceptions}</b> & {days:,}")
-        assert "&lt;b&gt;33&lt;/b&gt; &amp; 685</p>" in markup
+        assert "<p>&lt;b&gt;33&lt;/b&gt; &amp; 685</p>" in markup
         assert "<b>" not in markup
 
     def test_line_is_built_only_from_the_backtest(self) -> None:
@@ -369,13 +388,19 @@ class TestEsBacktestLine:
         return risk_strip_html(TestRiskStrip()._summary(backtest=test), RISK_STRIP)
 
     def test_the_es_line_sits_under_the_var_line(self) -> None:
-        expected = (
-            f'Kupiec{NB}p{NB}0.83, independence{NB}p{NB}0.29.</p><p class="cm-risk-test">'
-            '<span class="cm-chip cm-chip-fail">Clusters</span> ES backtest, 5 years: 14 of 685 '
-            "changes beyond the 97.5% VaR (2.0%, 2.5% expected); mean loss 0.97× ES; "
-            f"Acerbi–{WJ}Szekely{NB}p{NB}0.84, independence{NB}p{NB}0.03.</p>"
+        plain = (
+            'in line with 1 day in 20.</p><p class="cm-risk-test">'
+            '<span class="cm-chip cm-chip-fail">Bunched</span> On the worst 1 day in 40, past '
+            "losses were about the size of the average above, but came bunched together.</p>"
         )
-        assert expected in self._strip(BACKTEST)
+        detail = (
+            f"Kupiec{NB}p{NB}0.83, independence{NB}p{NB}0.29.</p><p>ES backtest: 14 of 685 "
+            "changes beyond the 97.5% VaR (2.0%, 2.5% expected); mean loss 0.97× ES; "
+            f"Acerbi–{WJ}Szekely{NB}p{NB}0.84, independence{NB}p{NB}0.03.</p></details>"
+        )
+        markup = self._strip(BACKTEST)
+        assert plain in markup
+        assert detail in markup
 
     @pytest.mark.parametrize(
         ("p", "independence", "verdict"),
@@ -390,8 +415,8 @@ class TestEsBacktestLine:
         self, p, independence, verdict
     ) -> None:
         test = replace(BACKTEST, z2_p=p, es_christoffersen_p=independence)
-        chip = f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{verdict}</span> ES backtest'
-        assert chip in self._strip(test)
+        chip = f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{CHIP_LABEL[verdict]}</span>'
+        assert f"{chip} On the worst 1 day in 40, {ES_VERDICT[verdict]}." in self._strip(test)
 
     def test_no_es_exception_has_no_severity(self) -> None:
         test = replace(BACKTEST, es_exceptions=0, es_ratio=math.nan, z2=1.0, z2_p=1.0)
