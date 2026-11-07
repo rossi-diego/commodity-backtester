@@ -5,9 +5,49 @@ from __future__ import annotations
 import datetime
 import html
 import logging
+import os
+import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import ModuleType
 from typing import cast
+
+
+def _drop_stale_src() -> None:
+    """Forget every ``src`` module when one of its files changed since it was imported.
+
+    Streamlit Cloud pulls a push and reruns this script, but keeps the ``src`` modules of the
+    running process, so a new ``app.py`` can meet an old ``src``. Run before the imports below.
+    """
+    loaded = _src_modules()
+    if any(_changed_since_import(module) for module in loaded.values()):
+        for name in loaded:
+            del sys.modules[name]
+        logging.getLogger(__name__).info("event=src_reloaded modules=%d", len(loaded))
+
+
+def _src_modules() -> dict[str, ModuleType]:
+    return {n: m for n, m in sys.modules.items() if n == "src" or n.startswith("src.")}
+
+
+def _changed_since_import(module: ModuleType) -> bool:
+    """Whether the module's file is newer than its import stamp, or than its bytecode.
+
+    A process started before the stamps existed has none: Python wrote each ``.pyc`` when it
+    first compiled the source, so a pulled file is newer than it.
+    """
+    path = getattr(module, "__file__", None)
+    if not path or not os.path.exists(path):
+        return False
+    imported = module.__dict__.get("_imported_at")
+    cached = getattr(module, "__cached__", None)
+    if imported is None and cached and os.path.exists(cached):
+        imported = os.path.getmtime(cached)
+    return imported is not None and os.path.getmtime(path) > imported
+
+
+_drop_stale_src()
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -60,6 +100,10 @@ from src.wording import (
     rin_note,
     usd,
 )
+
+# Stamp each src module with its import time, for the next run's _drop_stale_src.
+for _module in _src_modules().values():
+    _module.__dict__.setdefault("_imported_at", time.time())
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
