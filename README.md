@@ -12,7 +12,7 @@ Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/)
 
 A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third of that product value in 2018–2020 (31% to 33% a year) to 39–45% from 2021 to 2025 and 51% in 2026 to date, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
 
-![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR and ES backtest lines and the worst clean days](docs/screenshot.png)
+![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart with its explanation and the latest levels](docs/screenshot.png)
 
 ---
 
@@ -23,7 +23,6 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
 | 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
 | 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
-| Risk: how much can a crush position move in a day? | A block under the crush chart, in plain words: the typical daily move, the loss on 1 day in 20 (VaR 95%) and the average loss on the worst 1 day in 40 (ES 97.5%) on a 1,000 t crusher's margin, unhedged, where that loss comes from, and whether the past 5 years bear the figures out. The model and the test statistics sit behind "Model and tests" | USD per tonne and USD |
 
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
@@ -107,12 +106,12 @@ On 2026-11-05 the RIN value exceeds the feedstock gap by about 743 USD/m³, usin
 
 ## Risk on a notional crush
 
-Under the crush chart, one row gives the 1-day risk of the crusher's margin on 1,000 t, unhedged (long meal and oil, short soybeans). It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
+This section is analysis behind the page, not on it: `src/risk.py` and `scripts/readme_figures.py` compute it, and the tests hold every figure. It gives the 1-day risk of the crusher's margin on 1,000 t, unhedged (long meal and oil, short soybeans). It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
 
 | Measure | Formula |
 |---|---|
 | Daily change | Δcrush between two consecutive sessions that are both clean, in USD/t. A change that touches a flagged session is dropped, so a roll jump is never a P&L |
-| Window | The 5 years to the last clean change, the same as the ranks. Under 250 standardised changes, the page shows n/a |
+| Window | The 5 years to the last clean change, the same as the ranks. Under 250 standardised changes, there is no figure |
 | P&L | 1,000 t × Δcrush |
 | Daily σ | Standard deviation of Δcrush over the last 20 clean changes and over the last year, in USD/t, not annualised |
 | EWMA volatility | σ²ₜ₊₁ = 0.94 σ²ₜ + 0.06 Δ²ₜ over clean changes, seeded with the mean square of the first 30, which never become scenarios |
@@ -138,7 +137,7 @@ Backtest from 2021-11-17 to 2026-10-29, at 95%:
 | Filtered HS (shown) | 685 | 33 | 4.8% | 0.83 | 0.29 |
 | Plain HS, same window | 685 | 65 | 9.5% | <0.001 | <0.001 |
 
-Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version. Under the four risk cells, the page states the backtest in words after a chip: "Checks out" when both p-values are 0.05 or more; "Too low" or "Too high" when Kupiec rejects with too many or too few exceptions; and "Bunched" when only the independence test rejects. The statistics themselves are behind "Model and tests".
+Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the filtered version is the one to use.
 
 ES backtest at 97.5%, on the same days:
 
@@ -146,11 +145,11 @@ ES backtest at 97.5%, on the same days:
 |---:|---:|---:|---:|---:|---:|---:|---:|
 | 685 | 14 | 2.0% | 0.43 | 0.03 | 0.97 | 0.20 | 0.84 |
 
-Mean loss / ES is the average loss on an exception day over that day's ES forecast. The published −0.70 critical value of Z2 is for 250 days, so the p-value is simulated: 2,000 samples, each drawing every day's outcome from that day's own scenarios, with a fixed seed. A second line on the page states this test in words, after its own chip, in the same order: "Too low" when the simulated Acerbi–Szekely p is below 0.05, "Bunched" when only the independence test of the 97.5% exceptions rejects, and "Checks out" otherwise. On this sample it reads "Bunched".
+Mean loss / ES is the average loss on an exception day over that day's ES forecast. The published −0.70 critical value of Z2 is for 250 days, so the p-value is simulated: 2,000 samples, each drawing every day's outcome from that day's own scenarios, with a fixed seed.
 
 At 97.5%, 2 of the 14 exceptions fall on the clean change right after another exception, so independence is rejected at that level (p 0.03); the 95% exceptions do not cluster (p 0.29).
 
-A third line lists the three worst clean days of the 5 years, on 1,000 t: −11,743 USD on 2023-07-26, −10,079 USD on 2023-03-23 and −10,035 USD on 2026-06-05.
+The three worst clean days of the 5 years, on 1,000 t: −11,743 USD on 2023-07-26, −10,079 USD on 2023-03-23 and −10,035 USD on 2026-06-05.
 
 ### What the risk sample leaves out
 

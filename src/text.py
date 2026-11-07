@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from .cards import MethodCard, RiskCopy
+from .cards import MethodCard
 from .rins import EPA_PAGE
 
 REPOSITORY_URL: Final[str] = "https://github.com/rossi-diego/soybean-crush-margin"
@@ -79,83 +79,6 @@ GAP_CARD: Final[dict[str, str]] = {
     "no_d4": "D4 RIN prices could not be loaded.",
     "scope": "Feedstock only: before conversion costs, BTC/45Z and LCFS.",
 }
-
-# The crush chart's risk strip, in two layers: plain lines for any reader, then the model and
-# its tests behind "Model and tests" for a risk reader. Each line holds at most 30 words once
-# filled by ``src.cards``; tests/test_text.py checks every variant.
-
-# The note under the plain lines. The effect is what the left-out changes do to the figures,
-# picked from the data by ``cards.risk_effect``.
-RISK_NOTE: Final[str] = (
-    "Based on 5 years of daily moves, scaled to how much prices move now. Roll and delivery days "
-    "are left out; {effect}."
-)
-RISK_EFFECT: Final[dict[str, str]] = {
-    "lower": "including them would lower these figures",
-    "raise": "including them would raise these figures",
-    "none": "too few to test their effect",
-}
-# The two checks in words, each after a chip. The verdict comes from ``cards.backtest_verdict``
-# and ``cards.es_verdict``; an ES verdict is never "Over-conservative".
-VAR_CHECK: Final[str] = (
-    "Checked on the past {years} years: losses passed the 1-in-20 level on {exceptions:,} of "
-    "{days:,} days ({rate:.1%}), {verdict}."
-)
-VAR_VERDICT: Final[dict[str, str]] = {
-    "Holds": "in line with 1 day in 20",
-    "Under-covers": "more often than 1 day in 20, so the figure understates the risk",
-    "Over-conservative": "less often than 1 day in 20, so the figure overstates the risk",
-    "Clusters": "in line with 1 day in 20, but bunched together",
-}
-ES_CHECK: Final[str] = "On the worst 1 day in 40, {verdict}."
-ES_VERDICT: Final[dict[str, str]] = {
-    "Holds": "past losses were about the size of the average above",
-    "Under-covers": "past losses were larger than the average above, so it understates the risk",
-    "Over-conservative": "past losses were smaller than the average above",
-    "Clusters": "past losses were about the size of the average above, but came bunched together",
-}
-CHIP_LABEL: Final[dict[str, str]] = {
-    "Holds": "Checks out",
-    "Under-covers": "Too low",
-    "Over-conservative": "Too high",
-    "Clusters": "Bunched",
-}
-# The worst clean days, filled by ``cards.worst_line``.
-WORST_LINE: Final[str] = "Worst days in {years} years, on {tonnes:,} t: {days}."
-
-# Behind "Model and tests". p-values arrive as text. No-break spaces keep each test's name,
-# its "p" and the value together, and a word joiner keeps the en dash from breaking the name,
-# so a narrow strip never ends a line on a bare "p".
-RISK_METHOD: Final[str] = (
-    "Filtered historical simulation: each clean 1-day change in the 5 years to {date} is "
-    "divided by its EWMA volatility (λ 0.94) and scaled to today's. Long 1,000 t board crush, "
-    "unhedged."
-)
-BACKTEST_LINE: Final[str] = (
-    "VaR 95% backtest: {exceptions:,} of {days:,} changes beyond the VaR ({rate:.1%}, "
-    "{expected:.0%} expected); Kupiec\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{kupiec}, "
-    "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
-)
-ES_BACKTEST_LINE: Final[str] = (
-    "ES backtest: {exceptions:,} of {days:,} changes beyond the {level:.1%} VaR "
-    "({rate:.1%}, {expected:.1%} expected); mean loss {severity}; "
-    "Acerbi\N{EN DASH}\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{z2p}, "
-    "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
-)
-
-RISK_STRIP: Final[RiskCopy] = RiskCopy(
-    note=RISK_NOTE,
-    effects=RISK_EFFECT,
-    var_check=VAR_CHECK,
-    var_verdict=VAR_VERDICT,
-    es_check=ES_CHECK,
-    es_verdict=ES_VERDICT,
-    chips=CHIP_LABEL,
-    worst=WORST_LINE,
-    method=RISK_METHOD,
-    var_test=BACKTEST_LINE,
-    es_test=ES_BACKTEST_LINE,
-)
 
 METHOD: Final[list[MethodCard]] = [
     MethodCard(
@@ -241,13 +164,5 @@ FULL_METHOD: Final[str] = (
     "a month of the five-year band needs 3 of those years. In contract months the delivery "
     "flags leave mostly the second half of the month. Ranks count clean sessions, so months "
     "without a delivery period weigh more. Part of the seasonal shape is the switch to "
-    "new-crop contracts.\n\n"
-    "**Risk.** Filtered historical simulation on the crusher's margin on 1,000 t, unhedged "
-    "(long meal and oil, short soybeans), front-month closes, not a hedge book. Each 1-day "
-    "change between consecutive clean sessions in the past 5 years is divided by its EWMA volatility (λ = 0.94), and VaR and ES are the tails of those "
-    "standardised changes times today's EWMA volatility. Unfiltered, a 5-year window weighs calm "
-    "and volatile years the same, so its exceptions cluster. The backtest forecasts each change "
-    "only from the changes before it. Delivery-period and roll changes are left out; see the "
-    "README for what that costs. Each leg's share of the ES is its mean in the ES scenarios "
-    "over the crush's."
+    "new-crop contracts."
 )

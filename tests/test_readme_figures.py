@@ -396,7 +396,7 @@ README_QUOTES = [
     "At 97.5%, {risk_es_back_to_back} of the {risk_es_backtest_exceptions} exceptions fall on "
     "the clean change right after another exception, so independence is rejected at that level "
     "(p {risk_es_christoffersen_p}); the 95% exceptions do not cluster (p {risk_christoffersen_p}).",
-    "A third line lists the three worst clean days of the 5 years, on 1,000 t: "
+    "The three worst clean days of the 5 years, on 1,000 t: "
     "{risk_worst_1_usd:,} USD on {risk_worst_1_date}, {risk_worst_2_usd:,} USD on "
     "{risk_worst_2_date} and {risk_worst_3_usd:,} USD on {risk_worst_3_date}.",
     "In the 5 years to {risk_date}, {risk_excluded_changes} changes stay in one contract but "
