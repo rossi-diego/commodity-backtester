@@ -3,11 +3,19 @@
 Caching strategy
 ----------------
 Downloaded data is persisted to a Parquet file (``config.YFINANCE_RAW``). The
-cache is served when it covers the requested range, within the slack defined in
-``config``. A fresh download only replaces the cache after it passes
+cache is served when it starts within ``config.CACHE_START_SLACK_DAYS`` of the
+requested start and ends no earlier than the business day before the requested
+end; ``yf.download`` treats its end as exclusive, so today's partial session is
+never expected. A fresh download only replaces the cache after it passes
 ``_response_problems``, and the write is atomic, so a partial Yahoo response can
 never overwrite good data. When a download fails or is rejected and a cache
-exists, the cache is returned; without one, ``DataLoaderError`` is raised.
+exists, the cache is returned; without one, ``DataLoaderError`` is raised. In the
+app, ``st.cache_data(ttl=3600)`` limits a holiday or outage to one download
+attempt per hour, and a failed download still returns the cache via ``_fall_back``.
+
+``read_snapshot`` and ``write_snapshot`` handle the committed CSV copy of the
+prices that the README figures are computed from. The snapshot is never used as a
+live fallback.
 """
 
 from __future__ import annotations
@@ -20,11 +28,19 @@ from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
+from pandas.tseries.offsets import BDay
 
 from . import config
 from .constants import commodities_dict, tickers
 
-__all__ = ["DataLoaderError", "LoadResult", "load_prices", "yahoo_quotes"]
+__all__ = [
+    "DataLoaderError",
+    "LoadResult",
+    "load_prices",
+    "read_snapshot",
+    "write_snapshot",
+    "yahoo_quotes",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +124,8 @@ def yahoo_quotes(
         starts_in_time = cached_start <= req_start + datetime.timedelta(
             days=config.CACHE_START_SLACK_DAYS
         )
-        ends_in_time = cached_end >= req_end - datetime.timedelta(
-            days=config.CACHE_STALE_AFTER_DAYS
-        )
-        if starts_in_time and ends_in_time:
+        last_expected = (pd.Timestamp(req_end).normalize() - BDay(1)).date()
+        if starts_in_time and cached_end >= last_expected:
             logger.info("event=data_load source=cache rows=%d as_of=%s", len(cached), cached_end)
             return cached.copy(), cached_start
 
@@ -233,3 +247,35 @@ def _write_cache(raw: pd.DataFrame, cache_path: Path) -> None:
     except Exception as exc:  # noqa: BLE001
         temp_path.unlink(missing_ok=True)
         logger.warning("event=cache_write_failed reason=%s", exc)
+
+
+# gzip stores a timestamp in its header; a fixed one makes the same data give the same bytes.
+_SNAPSHOT_COMPRESSION = {"method": "gzip", "mtime": 0}
+
+
+def read_snapshot(path: Path) -> pd.DataFrame:
+    """Read a CSV price snapshot, exactly as ``write_snapshot`` wrote it.
+
+    Raises
+    ------
+    DataLoaderError
+        If the file cannot be read or does not hold the tracked columns, in order.
+    """
+    try:
+        prices = pd.read_csv(path, index_col="date", parse_dates=True).astype("float64")
+    except Exception as exc:  # noqa: BLE001
+        raise DataLoaderError(f"Snapshot {path.name} is unreadable: {exc}") from exc
+    expected = list(commodities_dict.values())
+    if list(prices.columns) != expected:
+        raise DataLoaderError(f"Snapshot {path.name} has columns {list(prices.columns)}")
+    if not isinstance(prices.index, pd.DatetimeIndex):
+        raise DataLoaderError(f"Snapshot {path.name} has a date that does not parse")
+    return prices.sort_index()
+
+
+def write_snapshot(prices: pd.DataFrame, path: Path) -> None:
+    """Write ``prices`` as gzipped CSV, lossless and byte-for-byte deterministic."""
+    frame = prices[list(commodities_dict.values())].sort_index().rename_axis("date")
+    frame.to_csv(
+        path, compression=_SNAPSHOT_COMPRESSION, date_format="%Y-%m-%d", lineterminator="\n"
+    )

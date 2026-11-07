@@ -6,13 +6,13 @@ Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/)
 
 [![Live App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://soybean-crush-margin.streamlit.app/)
 [![CI](https://github.com/rossi-diego/soybean-crush-margin/actions/workflows/ci.yml/badge.svg)](https://github.com/rossi-diego/soybean-crush-margin/actions/workflows/ci.yml)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![Python 3.11 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.14-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third to about half of that product value, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
 
-![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart](docs/screenshot.png)
+![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR backtest line](docs/screenshot.png)
 
 ---
 
@@ -23,13 +23,14 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
 | 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
 | 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
+| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over the last 20 clean changes and 1 year, 1-day VaR 95% and ES 97.5% (filtered historical simulation, backtested) on a long 1,000 t board crush, and each leg's share of the risk | USD per tonne and USD |
 
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
 - **History**: the series over 5 years, 10 years or all of it, with roll and delivery sessions in grey.
-- **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. The month in progress is a hollow dot, not joined to the line.
+- **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. This year's legend entry reads "2026 (to date)", and the month in progress is a hollow dot, not joined to the line.
 
-The oil cost chart has a switch that adds the D4 RIN to the calculation. The third card always shows both numbers, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
+The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap after the RIN is drawn in cyan, a colour no other line uses. The third card always shows both numbers, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
 
 ## How it is calculated
 
@@ -46,15 +47,68 @@ Unit conversions use the exact definitions (1 lb = 0.45359237 kg, 1 US gallon = 
 
 On 2026-10-27 the crush margin was 88.43 USD/t (2.41 USD/bu), oil was 50% of the product value, and soybean oil cost 1,324 USD per m³ of biodiesel against 1,262 USD/m³ for heating oil. `tests/test_margins.py` asserts these figures from that day's closes.
 
-With the D4 RIN at 2.09 USD in the week of 2026-09-21, the credit is worth about 829 USD per m³ of biodiesel. In yearly averages the gap before the credit was +236 USD/m³ in 2024 and +366 in 2025, and after it −66 and −3: the RIN price moves to close the feedstock gap, as the theory of the credit predicts.
+The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per m³ of biodiesel. Yearly averages of the oil cost against heating oil, in USD/m³, on clean sessions, with held RIN prices excluded:
+
+| Year | Gap before the RIN | Gap after the RIN |
+|---|---:|---:|
+| 2021 | +604 | +85 |
+| 2022 | +471 | −160 |
+| 2023 | +385 | −232 |
+| 2024 | +236 | −72 |
+| 2025 | +361 | −2 |
+| 2026 (to date) | +368 | −288 |
+
+The D4, yearly, roll and risk figures in this README come from `python -m scripts.readme_figures --snapshot` (data to 2026-11-05, committed in tests/fixtures) and are asserted by tests/test_readme_figures.py.
+
+The D4 does not simply close the gap, because the gap is not the producer's whole bill. A negative value after the RIN is what is left to pay for conversion (methanol, energy, the plant) and for margin. Through 2024 the $1/gal blenders' tax credit (BTC, 264 USD/m³) paid part of the gap ([AFDC](https://afdc.energy.gov/laws/395)), and from 2025 the 45Z clean fuel production credit replaced it, with a value that depends on carbon intensity ([IRS](https://www.irs.gov/credits-deductions/clean-fuel-production-credit)). LCFS credits pay in some states ([AFDC](https://afdc.energy.gov/laws/6308)), and renewable diesel, at 1.7 RINs per gallon ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)), is the marginal gallon.
+
+On 2026-11-05 the RIN value exceeds the feedstock gap by about 743 USD/m³, using a D4 price held since the last EPA week while heating oil kept moving, before conversion costs.
+
+## Risk on a notional crush
+
+Under the crush chart, one row gives the 1-day risk of a long board crush of 1,000 t of soybeans: long meal and oil, short soybeans. It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
+
+| Measure | Formula |
+|---|---|
+| Daily change | Δcrush between two consecutive sessions that are both clean, in USD/t. A change that touches a flagged session is dropped, so a roll jump is never a P&L |
+| Window | The 5 years to the last clean change, the same as the ranks. Under 250 standardised changes, the page shows n/a |
+| P&L | 1,000 t × Δcrush |
+| Daily σ | Standard deviation of Δcrush over the last 20 clean changes and over the last year, in USD/t, not annualised |
+| EWMA volatility | σ²ₜ₊₁ = 0.94 σ²ₜ + 0.06 Δ²ₜ over clean changes, seeded with the mean square of the first 30, which never become scenarios |
+| Standardised change | zₜ = Δcrushₜ / σₜ, with σₜ from earlier changes only |
+| VaR 95% | −1,000 t × σ_next × (5% quantile of z over 5 years), linear interpolation, 1 day, no square-root-of-time scaling |
+| ES 97.5% | −1,000 t × σ_next × (mean of z at or below its 2.5% quantile) |
+| Backtest | Each change in the 5 years is forecast only from earlier changes; an exception is a P&L below −VaR. Kupiec POF against 5% and Christoffersen independence, each χ² with 1 df |
+| Risk by leg | cov(leg, Δcrush) / var(Δcrush) for meal, oil and −soybeans, equal-weighted over 5 years. The three add up to 100%, and a leg that offsets the others is negative |
+
+On the clean changes to 2026-10-29 (685 in 5 years; data to 2026-11-05), with σ_next = 3.59 USD/t:
+
+| Daily σ, last 20 changes | Daily σ, 1 year | 1-day VaR 95% | 1-day ES 97.5% | Risk by leg |
+|---:|---:|---:|---:|---|
+| 3.91 USD/t | 3.66 USD/t | 6,114 USD | 8,720 USD | oil 51%, meal 31%, soybeans 17% |
+
+A change needs two clean ends, so 685 changes in 5 years is about 137 a year. That is why the window is 5 years: one year would leave about 3 scenarios beyond the 97.5% quantile.
+
+Backtest from 2021-11-17 to 2026-10-29, at 95%:
+
+| Method | Changes | Exceptions | Rate | Kupiec p | Christoffersen p |
+|---|---:|---:|---:|---:|---:|
+| Filtered HS (shown) | 685 | 33 | 4.8% | 0.83 | 0.29 |
+| Plain HS, same window | 685 | 65 | 9.5% | <0.001 | <0.001 |
+
+Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version. The page states its backtest in one line under the four risk cells, after a chip: "Holds" when both p-values are 0.05 or more, "Under-covers" when either is below.
+
+### What the risk sample leaves out
+
+In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones; they are more volatile, σ 4.49 against 3.53 USD/t. The VaR therefore does not cover holding a contract into delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
 
 ## Rolls and delivery
 
 Yahoo Finance's continuous `=F` series stay in the nearest contract until its last trading day, so they trade through the delivery period and then jump to the next contract. A trader who does not take delivery would have rolled before first notice.
 
-`src/rolls.py` rebuilds approximate CBOT and NYMEX contract calendars and flags every session where a leg is in its delivery period or has just switched contract. Flagged sessions are drawn as a thin grey line and left out of every range and percentile: about 4 in 10 sessions for the crush. Measured on 2000 to 2026, they hold 19 of the 20 largest daily moves in the crush, including the record low of −1.82 USD/bu on 2008-09-12, which was an expiring September contract and not a real margin.
+`src/rolls.py` rebuilds approximate CBOT and NYMEX contract calendars and flags every session where a leg is in its delivery period or has just switched contract. Flagged sessions are drawn as a thin grey line and left out of every range and percentile: 42% of crush sessions. Measured on 2000 to 2026, they hold 19 of the 20 largest daily moves in the crush, including the record low of −1.82 USD/bu on 2008-09-12, which was an expiring September contract and not a real margin.
 
-From mid-September to mid-December the front months are not the board crush pair: November beans trade against October, then December, products, and January beans against December products. Those sessions are kept, because their daily changes match clean sessions (median 0.86 against 0.89 USD/t), but their level includes a product calendar spread.
+From about 15 October, November beans against December products is the CME board pair. Two stretches are not: late September (Nov beans, Oct products) and the second half of November (Jan beans, Dec products); the rest of each off-pair stretch is already flagged as product delivery. Those sessions are kept, because their daily changes between clean sessions match the board pair's (median 0.86 against 0.89 USD/t), but their level includes a product calendar spread.
 
 ## D4 RIN prices
 
@@ -69,7 +123,7 @@ These are deliberate limits for a project built on free data. A production desk 
 | Left out | Why it matters |
 |---|---|
 | Plant costs, energy, freight, local basis | The page shows a gross board margin, not plant profit |
-| The 45Z and LCFS credits | They can decide biodiesel profitability, and depend on carbon intensity and state rules |
+| The BTC, 45Z and LCFS credits | The $1/gal blenders' tax credit ran (often renewed retroactively) to 2024; 45Z replaced it in 2025. 45Z and LCFS depend on carbon intensity and state rules |
 | Who keeps the RIN | The RIN goes to whoever blends the fuel, so a producer earns it only through the price of biodiesel |
 | Daily RIN prices | Daily assessments (Argus, OPIS, Fastmarkets) are paid; the EPA series is weekly and published monthly |
 | Energy content | Biodiesel holds about 7% less energy than diesel per unit of volume ([AFDC](https://afdc.energy.gov/fuels/properties)); the gap compares volumes |
@@ -89,9 +143,11 @@ src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg dr
 src/rolls.py     contract calendars: delivery and switch flags
 src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
 src/seasonal.py  latest clean reading, 5-year percentile, monthly averages by year
+src/risk.py      clean daily changes; filtered 1-day VaR and ES, backtest, risk by leg
    |
    v
-src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy) -> app.py (Streamlit page)
+src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy)
+   + src/styles.py (page CSS) -> app.py (Streamlit page)
 ```
 
 Logs use `key=value` fields, for example `event=data_load source=cache rows=6711 as_of=2026-10-30`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
@@ -112,11 +168,26 @@ The first run downloads about 26 years of daily closes from Yahoo Finance, which
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                  # tests and coverage
-ruff format --check src/ tests/ app.py  # formatting
-ruff check src/ tests/ app.py           # lint
-mypy src/                               # type-check
+pytest                                           # tests, and src coverage of at least 95%
+ruff format --check src/ tests/ scripts/ app.py  # formatting
+ruff check src/ tests/ scripts/ app.py           # lint
+mypy src/ app.py scripts/                        # type-check, strict
+pip-audit -r requirements.txt --strict           # known vulnerabilities in every runtime package
+python -m scripts.readme_figures --snapshot      # the README figures, offline
 ```
+
+CI runs the tests on Python 3.11 and 3.14, the version Streamlit Community Cloud uses.
+
+The direct dependencies are pinned in `requirements.in` and `requirements-dev.in`. The lock files are generated with [uv](https://docs.astral.sh/uv/) for every platform and Python version, and the dev lock is constrained to the runtime lock, so dev, CI and the live app run the same versions:
+
+```bash
+uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
+uv pip compile requirements-dev.in --universal --python-version 3.11 -c requirements.txt -o requirements-dev.txt
+```
+
+To bump a package, edit its pin in the `.in` file, then run the same command with `--upgrade-package <name>`, first for `requirements.txt` and then for `requirements-dev.txt`.
+
+`python -m scripts.readme_figures --write-snapshot` saves the live prices and the D4 cache to `tests/fixtures`, named by the last price date. Point `SNAPSHOT_DATE` in the script at a new pair, then update the README and the expected figures in `tests/test_readme_figures.py` together.
 
 ## Project structure
 
@@ -125,6 +196,7 @@ soybean-crush-margin/
 ├── app.py                      # Streamlit page only
 ├── .streamlit/config.toml      # Dark theme
 ├── docs/screenshot.png         # README screenshot
+├── docs/{before,after}_*.png   # Full page with the D4 RIN on, at 1440, 1024 and 390 px
 ├── data/seed/                  # Dated copy of the EPA D4 RIN series, the fallback
 ├── src/
 │   ├── config.py               # Paths and cache settings
@@ -134,14 +206,20 @@ soybean-crush-margin/
 │   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
 │   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions
+│   ├── risk.py                 # Clean daily changes, filtered VaR and ES, backtest, risk by leg
 │   ├── visualization.py        # Plotly figure builders, no UI imports
 │   ├── cards.py                # HTML for the cards, rails and method notes
+│   ├── styles.py               # The page CSS
 │   └── text.py                 # Page copy, held to length limits by tests
+├── scripts/readme_figures.py   # The D4, yearly, roll and risk figures in this README
 ├── tests/                      # Unit tests per module, and the page end to end with AppTest
-├── .github/workflows/ci.yml    # CI: lint, type-check, test
+│   └── fixtures/               # Dated price and D4 snapshot behind the README figures
+├── .github/workflows/ci.yml    # CI: lint, type-check, test, audit
 ├── pyproject.toml              # Ruff, mypy, pytest configuration
-├── requirements.txt            # Runtime dependencies, pinned
-└── requirements-dev.txt        # Development dependencies
+├── requirements.in             # Runtime dependencies, direct pins
+├── requirements.txt            # Runtime lock, generated by uv
+├── requirements-dev.in         # Development dependencies, direct pins
+└── requirements-dev.txt        # Development lock, generated by uv
 ```
 
 ## Key design decisions

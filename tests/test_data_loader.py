@@ -15,7 +15,14 @@ import pytest
 
 from src import config as dl_config
 from src.constants import commodities_dict
-from src.data_loader import DataLoaderError, _response_problems, load_prices, yahoo_quotes
+from src.data_loader import (
+    DataLoaderError,
+    _response_problems,
+    load_prices,
+    read_snapshot,
+    write_snapshot,
+    yahoo_quotes,
+)
 
 TICKER_BY_NAME = {name: ticker for ticker, name in commodities_dict.items()}
 NAMES = list(commodities_dict.values())
@@ -176,6 +183,115 @@ class TestYahooQuotes:
             df, _ = yahoo_quotes("2000-01-03", "2000-01-28")
         mock_dl.assert_called_once()
         assert len(df) == 20
+
+
+# ---------------------------------------------------------------------------
+# Refetch once the cache misses the last business day
+# ---------------------------------------------------------------------------
+
+
+class TestLastBusinessDay:
+    """yf.download's end is exclusive, so the cache is current if it ends one business day before."""
+
+    @pytest.mark.parametrize(
+        ("cache_end", "req_end"),
+        [
+            ("2024-06-26", "2024-06-27"),  # Wednesday cache, Thursday request
+            ("2024-06-28", "2024-07-01"),  # Friday cache, Monday request
+            ("2024-06-28", "2024-06-29"),  # Friday cache, Saturday request
+        ],
+    )
+    def test_cache_ending_the_business_day_before_is_served(self, cache_file, cache_end, req_end):
+        _full_cached_df("2000-03-15", cache_end).to_parquet(cache_file)
+        with patch("src.data_loader.yf.download") as mock_dl:
+            df, _ = yahoo_quotes("2000-01-01", req_end)
+        mock_dl.assert_not_called()
+        assert df.index.max() == pd.Timestamp(cache_end)
+
+    def test_cache_two_business_days_behind_is_refreshed(self, cache_file):
+        cached = _full_cached_df("2000-03-15", "2024-06-25")
+        cached.to_parquet(cache_file)
+        response = _extended(cached, extra_days=1)
+        with patch("src.data_loader.yf.download") as mock_dl:
+            mock_dl.return_value = {"Close": _as_response(response)}
+            df, _ = yahoo_quotes("2000-01-01", "2024-06-27")
+        mock_dl.assert_called_once()
+        assert df.index.max() == pd.Timestamp("2024-06-26")
+        assert pd.read_parquet(cache_file).index.max() == pd.Timestamp("2024-06-26")
+
+    def test_failed_refresh_returns_the_cache(self, cache_file, caplog):
+        cached = _full_cached_df("2000-03-15", "2024-06-25")
+        cached.to_parquet(cache_file)
+        with (
+            patch("src.data_loader.yf.download", side_effect=RuntimeError("down")) as mock_dl,
+            caplog.at_level("WARNING", logger="src.data_loader"),
+        ):
+            df, _ = yahoo_quotes("2000-01-01", "2024-06-27")
+        mock_dl.assert_called_once()
+        _assert_same_frame(df, cached)
+        assert any("event=data_load source=stale_cache" in r.getMessage() for r in caplog.records)
+
+    def test_holiday_refresh_with_no_new_session_is_accepted(self, cache_file):
+        """On an exchange holiday the download repeats the cache, and that is not an error."""
+        cached = _full_cached_df("2000-03-15", "2024-06-25")
+        cached.to_parquet(cache_file)
+        df, mock_dl = _refresh_with_end(cached, "2024-06-27")
+        mock_dl.assert_called_once()
+        _assert_same_frame(df, cached)
+
+
+def _refresh_with_end(response: pd.DataFrame, end: str) -> tuple[pd.DataFrame, MagicMock]:
+    with patch("src.data_loader.yf.download") as mock_dl:
+        mock_dl.return_value = {"Close": _as_response(response)}
+        df, _ = yahoo_quotes("2000-01-01", end)
+    return df, mock_dl
+
+
+# ---------------------------------------------------------------------------
+# Committed snapshot
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshot:
+    def _prices(self) -> pd.DataFrame:
+        frame = _full_cached_df("2020-01-01", "2020-03-31")
+        rng = np.random.default_rng(7)
+        frame[:] = rng.normal(500.0, 50.0, frame.shape) / 3.0  # floats with long reprs
+        frame.iloc[3, 1] = np.nan
+        return frame
+
+    def test_round_trip_is_exact(self, tmp_path):
+        prices = self._prices()
+        path = tmp_path / "prices.csv.gz"
+        write_snapshot(prices[NAMES[::-1]], path)
+        back = read_snapshot(path)
+        assert list(back.columns) == NAMES
+        pd.testing.assert_frame_equal(back, prices, check_exact=True, check_freq=False)
+
+    def test_rewriting_gives_the_same_bytes(self, tmp_path):
+        path = tmp_path / "prices.csv.gz"
+        write_snapshot(self._prices(), path)
+        first = path.read_bytes()
+        write_snapshot(self._prices(), path)
+        assert path.read_bytes() == first
+
+    def test_wrong_columns_are_rejected(self, tmp_path):
+        path = tmp_path / "prices.csv.gz"
+        self._prices().drop(columns="Soybean").to_csv(path)
+        with pytest.raises(DataLoaderError, match="has columns"):
+            read_snapshot(path)
+
+    def test_unparseable_date_is_rejected(self, tmp_path):
+        path = tmp_path / "prices.csv"
+        prices = self._prices().iloc[:3]
+        prices.index = pd.Index(["2020-01-01", "not a date", "2020-01-03"], name="date")
+        prices.to_csv(path)
+        with pytest.raises(DataLoaderError, match="does not parse"):
+            read_snapshot(path)
+
+    def test_missing_file_is_rejected(self, tmp_path):
+        with pytest.raises(DataLoaderError, match="unreadable"):
+            read_snapshot(tmp_path / "missing.csv.gz")
 
 
 # ---------------------------------------------------------------------------

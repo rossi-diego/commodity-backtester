@@ -6,13 +6,16 @@ import pandas as pd
 
 from src.rolls import (
     BEAN_MONTHS,
+    BOARD_PAIRS,
     DIESEL_MONTHS,
     crush_flags,
+    crush_switches,
     front_contracts,
     gap_flags,
     grain_first_notice,
     grain_last_trade,
     monthly_last_trade,
+    off_pair,
 )
 
 
@@ -60,8 +63,8 @@ class TestFlags:
         flags = crush_flags(pd.bdate_range("2008-09-01", "2008-09-30"))
         assert flags.loc["2008-09-12"]
 
-    def test_off_pair_months_are_kept(self) -> None:
-        """November beans with October products is not the board pair, but it is not flagged."""
+    def test_board_pair_from_mid_october_is_kept(self) -> None:
+        """From 15 October November beans meet December products, the CME board pair; not flagged."""
         flags = crush_flags(pd.bdate_range("2026-10-15", "2026-10-29"))
         assert not flags.any()
 
@@ -69,8 +72,40 @@ class TestFlags:
         share = crush_flags(pd.bdate_range("2010-01-01", "2019-12-31")).mean()
         assert 0.35 < share < 0.5
 
+    def test_crush_switches_are_flagged_first_sessions(self) -> None:
+        dates = pd.bdate_range("2024-01-01", "2026-12-31")
+        switches = crush_switches(dates)
+        assert switches.name == "switch"
+        assert switches.any()
+        assert not (switches & ~crush_flags(dates)).any()
+        # The first session on January beans, from the November contract.
+        assert switches.loc["2025-11-17"]
+        assert crush_flags(dates).loc["2025-11-17"]
+        # Inside November delivery: flagged, but not a switch.
+        assert not switches.loc["2025-11-05"]
+        assert crush_flags(dates).loc["2025-11-05"]
+
     def test_gap_flags_include_heating_oil_switches(self) -> None:
         flags = gap_flags(pd.bdate_range("2026-09-21", "2026-10-09"))
         assert flags.loc["2026-10-01"]
         # Soybean oil is in October delivery from 30 September, so the day before is clean.
         assert not flags.loc["2026-09-29"]
+
+
+class TestBoardPairs:
+    def test_board_pairs_cover_every_bean_month(self) -> None:
+        assert set(BOARD_PAIRS) == set(BEAN_MONTHS)
+
+    def test_off_pair_windows(self) -> None:
+        """Late September (Nov beans, Oct products) and late November (Jan beans, Dec products)."""
+        dates = pd.bdate_range("2025-09-01", "2025-12-31")
+        off = off_pair(dates)
+        flags = crush_flags(dates)
+        assert off.name == "off_pair"
+        for day in ("2025-09-22", "2025-11-20"):
+            assert off.loc[day]
+            assert not flags.loc[day]
+        assert not off.loc["2025-10-20"]
+
+    def test_off_pair_on_no_dates(self) -> None:
+        assert off_pair(pd.DatetimeIndex([])).empty

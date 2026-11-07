@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -14,11 +15,15 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from src import config, visualization
-from src.margins import crush_table
+from src.cards import risk_strip_html
+from src.margins import RIN_TOLERANCE, crush_table
+from src.risk import risk_summary
 from src.seasonal import latest_reading
+from src.text import BACKTEST_LINE, RISK_NOTE
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
+CSS = (ROOT / "src" / "styles.py").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 SECTIONS = ["crush", "share", "gap"]
 LABELS = ["Crush margin", "Oil share", "Oil cost vs diesel"]
@@ -87,6 +92,15 @@ def _no_exceptions(at: AppTest) -> None:
     assert not at.exception, [exc.value for exc in at.exception]
 
 
+def _y_title(at: AppTest, key: str) -> str:
+    return json.loads(_chart(at, key))["layout"]["yaxis"]["title"]["text"]
+
+
+def _footer_day(date: pd.Timestamp) -> str:
+    """The footer is markdown, so its dates hold together with no-break spaces."""
+    return f"{date.day} {date:%b} {date:%Y}"
+
+
 # ---------------------------------------------------------------------------
 # First load
 # ---------------------------------------------------------------------------
@@ -130,18 +144,78 @@ class TestFirstLoad:
         app.toggle(key="rin-gap").set_value(True).run()
         _no_exceptions(app)
         assert _text(_kpis(app)) == cards
-        assert f"D4 RIN prices from EPA to the week of {week.date()}, saved copy." in (
+        assert f"D4 RIN prices from EPA to the week of {_footer_day(week)}, saved copy." in (
             app.caption[-1].value
         )
 
+    def test_gap_rank_names_its_series(self, app) -> None:
+        app.run()
+        gap_card = _kpis(app).split('cm-kpi-gap"', 1)[1]
+        assert "percentile of 5 years, before the RIN" in gap_card
+        assert 'percentile of 5 years, before the RIN"' in gap_card
+
+    def test_rin_card_compares_with_heating_oil_plus_the_rin(self, app) -> None:
+        """The fixture runs to today and the seed D4 stops weeks earlier, so the RIN is held."""
+        app.run()
+        cards = _text(_kpis(app))
+        assert re.search(r"(less|more) than heating oil plus the RIN", cards)
+        assert "D4 price held." in cards
+        assert "BTC/45Z and LCFS" in cards
+
     def test_rin_toggle_changes_the_chart_and_the_sentence(self, app) -> None:
         app.run()
-        assert "Oil minus heating oil, USD per m" in _chart(app, "gap")
+        assert _y_title(app, "gap") == "Oil − heating oil, USD/m³"
+        assert "dtick" not in json.loads(_chart(app, "gap"))["layout"]["yaxis"]
+        assert _y_title(app, "crush") == "USD/t of soybeans"
+        assert _y_title(app, "share") == "Oil share, %"
         app.toggle(key="rin-gap").set_value(True).run()
         _no_exceptions(app)
-        assert "Oil minus heating oil and D4 RIN" in _chart(app, "gap")
+        assert _y_title(app, "gap") == "Oil − heating oil − RIN, USD/m³"
+        assert json.loads(_chart(app, "gap"))["layout"]["yaxis"]["dtick"] == 250
         assert "Before the RIN" in _chart(app, "gap")
-        assert "Oil cost vs diesel With the D4 RIN," in _head(app, "gap")
+        assert "Oil cost vs diesel With the D4 RIN held at the EPA week of" in _head(app, "gap")
+
+    def test_gap_after_the_rin_is_drawn_in_cyan(self, app) -> None:
+        app.run()
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        traces = json.loads(_chart(app, "gap"))["data"]
+        main = next(trace for trace in traces if trace.get("name") == "After the D4 RIN")
+        assert main["line"]["color"] == visualization.RIN
+        app.button_group(key="view-gap").set_value("By month").run()
+        year = pd.Timestamp.today().year
+        traces = json.loads(_chart(app, "gap"))["data"]
+        current = next(trace for trace in traces if trace.get("name") == f"{year} (to date)")
+        assert current["line"]["color"] == visualization.RIN
+
+    def test_held_rin_sentence_names_the_week_and_does_not_rank(self, app) -> None:
+        """The seed D4 ends weeks before the fixture's prices, so the latest RIN is held."""
+        seed = pd.read_csv(config.RIN_SEED)
+        week = pd.Timestamp(seed["week"].iloc[-1])
+        assert pd.Timestamp.today().normalize() - week > RIN_TOLERANCE
+        app.run()
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        head = _head(app, "gap")
+        assert f"With the D4 RIN held at the EPA week of {week.day} {week:%b}, " in head
+        assert head.rstrip().endswith("Not ranked while the price is held.")
+        assert "higher than" not in head
+        assert "lower than" not in head
+
+    def test_fresh_rin_sentence_keeps_the_rank(self, app, monkeypatch, tmp_path) -> None:
+        weeks = pd.date_range("2010-07-05", pd.Timestamp.today(), freq="W-MON")
+        fresh = tmp_path / "fresh.csv"
+        pd.DataFrame({"week": weeks.strftime("%Y-%m-%d"), "usd_per_rin": 1.5}).to_csv(
+            fresh, index=False
+        )
+        monkeypatch.setattr(config, "RIN_SEED", fresh)
+        app.run()
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        head = _head(app, "gap")
+        assert "Oil cost vs diesel With the D4 RIN, " in head
+        assert "Not ranked" not in head
+        assert re.search(r"higher than \d+% of clean days in the past 5 years", head)
 
     def test_page_works_without_any_rin_data(self, app, monkeypatch, tmp_path) -> None:
         monkeypatch.setattr(config, "RIN_SEED", tmp_path / "missing.csv")
@@ -168,10 +242,25 @@ class TestFirstLoad:
             assert text in hero
         assert not app.warning
 
+    def test_risk_strip_matches_the_engine(self, app, synthetic_prices) -> None:
+        app.run()
+        _no_exceptions(app)
+        summary = risk_summary(crush_table(synthetic_prices))
+        assert summary is not None
+        strip = _block(app, 'class="cm-risk"')
+        assert strip == risk_strip_html(summary, RISK_NOTE, BACKTEST_LINE)
+        assert strip.count('class="cm-risk-cell"') == 4
+        assert summary.backtest is not None
+        assert strip.count('class="cm-risk-test"') == 1
+        assert strip.index('class="cm-risk-test"') > strip.index("</dl>")
+        assert strip.index('class="cm-risk-test"') < strip.index('class="cm-risk-note"')
+        assert f"${summary.var:,.0f}" in strip
+        assert _html(app).count('class="cm-risk"') == 1
+
     def test_footer_dates_the_data_and_disclaims(self, app, synthetic_prices) -> None:
         app.run()
         footer = app.caption[-1].value
-        assert f"Data to {synthetic_prices.index.max().date()}." in footer
+        assert f"Data to {_footer_day(synthetic_prices.index.max())}." in footer
         assert (
             "Personal project, not affiliated with any employer. Not investment advice." in footer
         )
@@ -196,11 +285,14 @@ class TestControls:
         _no_exceptions(app)
         year = pd.Timestamp.today().year
         spec = _chart(app, key)
-        for name in (str(year), str(year - 1), str(year - 2), "averages"):
-            assert f'"name":"{name}' in spec or name in spec
+        names = [trace.get("name") for trace in json.loads(spec)["data"]]
+        for name in (f"{year} (to date)", str(year - 1), str(year - 2)):
+            assert name in names
+        assert "Range" in names
         assert "against" in _head(app, key) or "too few" in _head(app, key)
         app.checkbox(key=f"band-{key}").uncheck().run()
-        assert "averages" not in _chart(app, key)
+        names = [trace.get("name") for trace in json.loads(_chart(app, key))["data"]]
+        assert not {"Range", "Avg"} & set(names)
 
     def test_years_are_capped(self, app) -> None:
         app.run()
@@ -294,8 +386,17 @@ class TestDataStates:
         with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
             at.run()
         _no_exceptions(at)
-        assert "2024-06-28 (may be out of date)" in _block(at, "cm-hero")
-        assert "2024-06-28 (may be out of date)" in at.caption[-1].value
+        hero = _block(at, "cm-hero")
+        assert '<span class="cm-nowrap">28 Jun 2024</span> (may be out of date)' in hero
+        assert "28 Jun 2024 (may be out of date)" in at.caption[-1].value
+        st.cache_data.clear()
+
+    def test_hero_dates_are_written_out_and_kept_whole(self, app) -> None:
+        app.run()
+        data_line = re.search(r'<p class="cm-meta">(.*?)</p>', _block(app, "cm-hero")).group(1)
+        assert not re.search(r"\d{4}-\d{2}-\d{2}", data_line)
+        assert re.search(r'<span class="cm-nowrap">\d{1,2} [A-Z][a-z]{2} \d{4}</span>', data_line)
+        assert not re.search(r"\d{4}-\d{2}-\d{2}", app.caption[-1].value)
         st.cache_data.clear()
 
     def test_missing_crush_leg_warns(self, tmp_path, monkeypatch, synthetic_prices) -> None:
@@ -322,6 +423,18 @@ class TestDataStates:
             "crush",
             "share",
         ]
+        st.cache_data.clear()
+
+    def test_short_history_has_no_risk_numbers(
+        self, tmp_path, monkeypatch, synthetic_prices
+    ) -> None:
+        at = _cached_app(monkeypatch, tmp_path, synthetic_prices.iloc[-200:])
+        with patch("src.data_loader.yf.download", side_effect=RuntimeError("yahoo down")):
+            at.run()
+        _no_exceptions(at)
+        strip = _block(at, 'class="cm-risk"')
+        assert "n/a: under 250 clean daily changes" in strip
+        assert "cm-risk-cell" not in strip
         st.cache_data.clear()
 
     def test_card_says_when_the_latest_close_is_flagged(self, tmp_path, monkeypatch) -> None:
@@ -359,31 +472,63 @@ def _contrast(first: str, second: str) -> float:
 
 @pytest.fixture()
 def tokens() -> dict[str, str]:
-    return dict(re.findall(r"--(\w+):(#[0-9a-f]{6})", SOURCE))
+    return dict(re.findall(r"--(\w+):(#[0-9a-f]{6})", CSS))
 
 
 class TestSource:
     def test_no_emoji_no_unsafe_html_one_css_block(self) -> None:
-        assert not EMOJI.search(SOURCE)
-        assert "unsafe_allow_html" not in SOURCE
-        assert SOURCE.count("<style>") == 1
-        assert "<script" not in SOURCE
+        page = SOURCE + CSS
+        assert not EMOJI.search(page)
+        assert "unsafe_allow_html" not in page
+        assert page.count("<style>") == 1
+        assert "<script" not in page
+
+    def test_no_claim_that_the_rin_covers_the_oil(self) -> None:
+        """The RIN only offsets part of the bill: the copy states the arithmetic, not a verdict."""
+        texts = [
+            SOURCE,
+            README,
+            *(p.read_text(encoding="utf-8") for p in (ROOT / "src").glob("*.py")),
+        ]
+        for text in texts:
+            for phrase in ("covers the oil", "closes the gap", "as the theory"):
+                assert phrase not in text
 
     def test_charts_use_no_streamlit_theme(self) -> None:
         """Without theme=None Streamlit silently replaces the axis colours of the figures."""
         assert SOURCE.count("st.plotly_chart(") == 1
         assert SOURCE.count("theme=None") == 1
 
-    def test_no_backtest_left(self) -> None:
+    def test_no_strategy_backtest_left(self) -> None:
+        """The only backtest left is the VaR's, in src/risk.py and the README."""
         for text in (SOURCE, README):
-            for word in ("Donchian", "momentum", "Buy & hold", "Backtest"):
+            for word in ("Donchian", "momentum", "Buy & hold", "Backtester", "strategy backtest"):
                 assert word not in text
 
     def test_page_clears_the_streamlit_cloud_bar(self) -> None:
         """The bar sits in the parent page, covers 56 px and hid the title in production."""
-        tops = re.findall(r"stMainBlockContainer'\]\{[^}]*?padding:([\d.]+)rem", SOURCE)
+        tops = re.findall(r"stMainBlockContainer'\]\{[^}]*?padding:([\d.]+)rem", CSS)
         assert len(tops) == 2
         assert all(float(top) * 15 >= 56 for top in tops)
+
+    def test_page_bottom_clears_the_streamlit_cloud_badge(self) -> None:
+        """The Cloud badge floats bottom right and covered the last card on a phone."""
+        paddings = re.findall(
+            r"stMainBlockContainer'\]\{[^}]*?padding:[\d.]+rem [\d.]+rem ([\d.]+)rem", CSS
+        )
+        assert len(paddings) == 2
+        assert all(float(bottom) >= 4.5 for bottom in paddings)
+
+    def test_option_chips_wrap_on_a_phone(self) -> None:
+        phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
+        assert "[class*='st-key-bar-'] [data-testid='stButtonGroup']" in phone
+
+    def test_risk_grid_is_two_by_two_on_a_phone(self) -> None:
+        phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
+        assert ".cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}" in phone
+        assert ".cm-risk-cell:first-child,.cm-risk-cell:last-child{grid-column:1/-1}" in phone
+        assert ".cm-leg{white-space:nowrap}" in CSS
+        assert ".cm-nowrap{white-space:nowrap}" in CSS
 
 
 class TestDarkTheme:
@@ -401,8 +546,11 @@ class TestDarkTheme:
         with (ROOT / ".streamlit" / "config.toml").open("rb") as file:
             theme = tomllib.load(file)["theme"]
         assert theme["primaryColor"] != tokens["crush"]
-        rules = [line for line in SOURCE.splitlines() if "var(--crush)" in line]
-        assert rules and all(line.startswith(".cm-kpi-crush") for line in rules)
+        rules = [line for line in CSS.splitlines() if "var(--crush)" in line]
+        # The one exception is a failed VaR backtest, flagged in the crush strip without red.
+        assert rules and all(line.startswith((".cm-kpi-crush", ".cm-chip-fail")) for line in rules)
+        risk = [line for line in CSS.splitlines() if ".cm-risk" in line]
+        assert risk and not any("--crush" in line for line in risk)
 
     @pytest.mark.parametrize(
         ("text", "surface"),
@@ -412,6 +560,8 @@ class TestDarkTheme:
         assert _contrast(tokens[text], tokens[surface]) >= 4.5
 
     def test_chart_marks_are_visible_on_the_surface(self) -> None:
+        # ROLL is left out on purpose: the roll trace is faint context under the clean line,
+        # not a mark to read, and the legend names it.
         for color in (
             visualization.CRUSH,
             visualization.OIL,

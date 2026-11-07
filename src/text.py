@@ -51,12 +51,26 @@ READING_HISTORY: Final[str] = (
     "left out of every statistic."
 )
 READING_BY_MONTH: Final[str] = (
-    "Bold: this year; the hollow dot is the month to date. Thin lines: the years you pick, "
-    "each in its own colour. Band: range of the five previous years."
+    "Bold: this year; hollow dot: month to date. Colours: years you pick. Band: range of "
+    "five previous years. Clean sessions fall mostly late in the month."
 )
 READING_RIN: Final[str] = (
-    "Line: oil minus heating oil and the D4 RIN value. Below zero, fuel value covers the oil. "
-    "Dashed: last EPA price held. Grey: before the RIN."
+    "Line: oil minus heating oil and D4 RIN value. Below zero, heating oil plus RIN exceed the "
+    "oil cost. Dashed: EPA price held. Dotted: before the RIN."
+)
+
+# Under the crush chart's risk strip, at most 30 words.
+RISK_NOTE: Final[str] = (
+    "Filtered historical simulation: 5 years of clean changes scaled to today's EWMA "
+    "volatility. Roll and delivery days are left out; they would lower the VaR. Long 1,000 t "
+    "board crush."
+)
+
+# The backtest line in the same strip, at most 30 words once filled by
+# ``cards.backtest_line`` from a Backtest and the risk constants; p-values arrive as text.
+BACKTEST_LINE: Final[str] = (
+    "Backtest, {years} years: {exceptions} of {days:,} changes beyond the VaR ({rate:.1%}, "
+    "{expected:.0%} expected); Kupiec p {kupiec}, independence p {independence}."
 )
 
 METHOD: Final[list[MethodCard]] = [
@@ -96,8 +110,8 @@ METHOD: Final[list[MethodCard]] = [
             ),
             (
                 "Pairs",
-                "from mid-September, November beans meet October products, and in late November "
-                "January beans meet December; those levels carry a product calendar spread.",
+                "late September has November beans with October products, and the second half of "
+                "November January beans with December; both carry a product calendar spread.",
             ),
         ),
         "Flags follow exchange calendars, not holidays.",
@@ -112,8 +126,8 @@ METHOD: Final[list[MethodCard]] = [
             ),
             (
                 "Credits",
-                "the 45Z and LCFS credits are not included, and the D4 RIN goes to whoever "
-                "blends the fuel, not necessarily the crusher.",
+                "the BTC (to 2024), 45Z and LCFS credits are not included, and the D4 RIN goes to "
+                "whoever blends the fuel, not necessarily the crusher.",
             ),
             (
                 "Data",
@@ -136,8 +150,20 @@ FULL_METHOD: Final[str] = (
     f"about 7% less energy than diesel ([AFDC]({AFDC_URL})).\n\n"
     "**D4 RIN prices.** Weekly volume-weighted averages of EMTS trades, read from EPA's public "
     f"RIN data ([EPA]({EPA_PAGE})). EPA dates each week by its Monday and publishes monthly, so "
-    "the latest weeks are held at the last price and drawn dashed. Renewable diesel earns 1.7 "
-    "RINs per gallon; only biodiesel is modelled.\n\n"
-    "**Monthly averages.** A month-year needs 5 clean sessions, the month in progress 3. Part "
-    "of the seasonal shape is the switch to new-crop contracts."
+    "the latest weeks are held at the last price and drawn dashed. A week's price is applied "
+    "from its Monday, so it includes trades later that week. Renewable diesel earns 1.7 RINs "
+    "per gallon; only biodiesel is modelled.\n\n"
+    "**Monthly averages.** A month-year needs 5 clean sessions, the month in progress 3, and "
+    "a month of the five-year band needs 3 of those years. In contract months the delivery "
+    "flags leave mostly the second half of the month. Ranks count clean sessions, so months "
+    "without a delivery period weigh more. Part of the seasonal shape is the switch to "
+    "new-crop contracts.\n\n"
+    "**Risk.** Filtered historical simulation on a long 1,000 t board crush, front-month "
+    "closes, not a hedge book. Each 1-day change between consecutive clean sessions in the past "
+    "5 years is divided by its EWMA volatility (λ = 0.94), and VaR and ES are the tails of those "
+    "standardised changes times today's EWMA volatility. Unfiltered, a 5-year window weighs calm "
+    "and volatile years the same, so its exceptions cluster. The backtest forecasts each change "
+    "only from the changes before it. Delivery-period and roll changes are left out; see the "
+    "README for what that costs. Risk by leg is each leg's covariance with the crush over 5 "
+    "years, over its variance."
 )

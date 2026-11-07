@@ -9,23 +9,45 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
+from typing import Final
+
+from .risk import (
+    ES_LEVEL,
+    MIN_CHANGES,
+    NOTIONAL_TONNES,
+    SHORT_VOL_CHANGES,
+    VAR_LEVEL,
+    Backtest,
+    RiskSummary,
+)
+from .seasonal import LOOKBACK_YEARS
 
 __all__ = [
+    "BACKTEST_SIGNIFICANCE",
     "Kpi",
     "MethodCard",
+    "backtest_fails",
+    "backtest_line",
     "kpi_row_html",
     "method_row_html",
     "ordinal",
     "percentile_html",
     "rail_html",
+    "risk_strip_html",
     "section_head_html",
     "split_bar_html",
 ]
 
+# A p-value under this rejects the VaR: too many exceptions, or exceptions that cluster.
+BACKTEST_SIGNIFICANCE: Final = 0.05
+
 
 @dataclass(frozen=True)
 class Kpi:
-    """One headline card. ``visual`` is markup from this module; the rest is text."""
+    """One headline card. ``visual`` is markup from this module; the rest is text.
+
+    ``rank_of`` names the series the percentile ranks, when it is not the headline value.
+    """
 
     key: str
     number: int
@@ -37,6 +59,7 @@ class Kpi:
     caption: str
     visual: str = ""
     tag: str = ""
+    rank_of: str = ""
 
 
 @dataclass(frozen=True)
@@ -56,14 +79,18 @@ def ordinal(value: float) -> str:
     return f"{number}{suffix}"
 
 
-def percentile_html(percentile: float | None) -> str:
-    """A track with a marker where today ranks among clean sessions in 5 years."""
+def percentile_html(percentile: float | None, rank_of: str = "") -> str:
+    """A track with a marker where today ranks among clean sessions in 5 years.
+
+    ``rank_of`` is appended to the label, to name the series that is ranked.
+    """
     if percentile is None:
         return (
             '<div class="cm-rank" role="img" aria-label="Not enough history to rank">'
             '<div class="cm-track"></div><span>Rank n/a: under a year of history</span></div>'
         )
-    text = f"{ordinal(percentile)} percentile of 5 years"
+    text = f"{ordinal(percentile)} percentile of 5 years" + (f", {rank_of}" if rank_of else "")
+    text = html.escape(text)
     return (
         f'<div class="cm-rank" role="img" aria-label="{text}">'
         f'<div class="cm-track"><span class="cm-mark" style="left:{percentile:.1f}%"></span></div>'
@@ -95,7 +122,7 @@ def _kpi(card: Kpi) -> str:
         f'<p class="cm-value">{html.escape(card.value)}'
         f"<small>{html.escape(card.note)}</small></p>"
         f'<div class="cm-detail">{card.visual or html.escape(card.detail)}</div>'
-        f"{percentile_html(card.percentile)}"
+        f"{percentile_html(card.percentile, card.rank_of)}"
         f'<p class="cm-caption">{html.escape(card.caption)}</p></a>'
     )
 
@@ -118,6 +145,82 @@ def rail_html(what: str, reading: str, today: list[tuple[str, str]]) -> str:
         f"<div><h3>Reading the chart</h3><p>{html.escape(reading)}</p></div>"
         f'<div class="cm-today"><h3>Today</h3><dl>{rows}</dl></div></div>'
     )
+
+
+def _signed_percent(share: float) -> str:
+    # A typographic minus, as in the page's USD values.
+    shown = round(share * 100)
+    sign = "−" if shown < 0 else ("+" if shown > 0 else "")
+    return f"{sign}{abs(shown)}%"
+
+
+def _dollars(value: float) -> str:
+    return f"{'−' if round(value) < 0 else ''}${abs(value):,.0f}"
+
+
+def _p_value(p: float) -> str:
+    return "< 0.01" if p < 0.01 else f"{p:.2f}"
+
+
+def backtest_fails(test: Backtest) -> bool:
+    """Either test rejects the VaR at the 5% level."""
+    return min(test.kupiec_p, test.christoffersen_p) < BACKTEST_SIGNIFICANCE
+
+
+def backtest_line(test: Backtest, template: str) -> str:
+    """The backtest sentence as plain text, filled only from ``test`` and the risk constants."""
+    return template.format(
+        years=LOOKBACK_YEARS,
+        exceptions=test.exceptions,
+        days=test.days,
+        rate=test.rate,
+        expected=1 - VAR_LEVEL,
+        kupiec=_p_value(test.kupiec_p),
+        independence=_p_value(test.christoffersen_p),
+    )
+
+
+def risk_strip_html(summary: RiskSummary | None, note: str, test_template: str) -> str:
+    """The 1-day risk of the crush in one row of four cells, under its chart.
+
+    When the summary has a backtest, a line under the cells states it, after a chip that
+    says whether the VaR holds; ``test_template`` is its copy, from ``src.text``.
+    """
+    if summary is None:
+        footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
+        line = f"n/a: under {MIN_CHANGES} clean daily changes"
+        return f'<div class="cm-risk"><p class="cm-risk-na">{html.escape(line)}</p>{footer}</div>'
+    d = summary.date
+    # d.day, not %-d, which is not portable to Windows.
+    as_of = f"As of {d.day} {d:%b %Y}, the last clean change. "
+    footer = f'<p class="cm-risk-note">{html.escape(as_of + note)}</p>'
+    if summary.backtest is not None:
+        fails = backtest_fails(summary.backtest)
+        chip = (
+            f'<span class="cm-chip cm-chip-{"fail" if fails else "pass"}">'
+            f"{'Under-covers' if fails else 'Holds'}</span>"
+        )
+        text = html.escape(backtest_line(summary.backtest, test_template))
+        footer = f'<p class="cm-risk-test">{chip} {text}</p>{footer}'
+    # Each leg stays on one line, so a narrow cell breaks only between legs.
+    legs = " · ".join(
+        f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
+        for leg, share in summary.contributions.items()
+    )
+    cells = [
+        (
+            f"Daily σ, last {SHORT_VOL_CHANGES} changes / 1 year",
+            html.escape(f"${summary.vol_20:,.2f}/t / ${summary.vol_1y:,.2f}/t"),
+        ),
+        (f"1-day VaR {VAR_LEVEL:.0%}, {NOTIONAL_TONNES:,} t", html.escape(_dollars(summary.var))),
+        (f"ES {ES_LEVEL:.1%}", html.escape(_dollars(summary.es))),
+        ("Risk by leg", legs),
+    ]
+    rows = "".join(
+        f'<div class="cm-risk-cell"><dt>{html.escape(label)}</dt><dd>{value}</dd></div>'
+        for label, value in cells
+    )
+    return f'<div class="cm-risk"><dl>{rows}</dl>{footer}</div>'
 
 
 def method_row_html(cards: list[MethodCard]) -> str:
