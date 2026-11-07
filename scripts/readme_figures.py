@@ -23,9 +23,9 @@ import pandas as pd
 
 from src import config
 from src.constants import BUSHELS_PER_TONNE, GALLONS_PER_M3
-from src.data_loader import load_prices, read_snapshot, write_snapshot
-from src.margins import add_rins, crush_table, gap_table, rin_per_m3
-from src.rins import _read, load_d4
+from src.data_loader import DataLoaderError, load_prices, read_snapshot, write_snapshot
+from src.margins import add_rins, break_even_d4, crush_table, gap_table, rin_per_m3
+from src.rins import load_d4, read_d4_csv
 from src.risk import (
     Backtest,
     christoffersen_independence,
@@ -92,6 +92,13 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
     for year in range(FIRST_YEAR, latest.year + 1):
         figures[f"gap_before_{year}"] = _rounded(before.get(year, float("nan")))
         figures[f"gap_after_{year}"] = _rounded(after.get(year, float("nan")))
+
+    # The D4 price that would close the latest clean gap, before conversion costs.
+    clean_gap = gap["gap"].where(~gap["flagged"].astype(bool)).dropna()
+    if not clean_gap.empty:
+        figures["d4_breakeven_date"] = pd.Timestamp(clean_gap.index[-1]).date().isoformat()
+        figures["latest_gap"] = _rounded(float(clean_gap.iloc[-1]))
+        figures["rin_break_even_usd"] = _rounded(break_even_d4(float(clean_gap.iloc[-1])), 2)
 
     clean_after = gap["after_rin"].where(~gap["flagged"].astype(bool)).dropna()
     if not clean_after.empty:
@@ -209,44 +216,56 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
 def _log_written(path: Path, rows: int) -> None:
     root = config.PROJECT_ROOT
     shown = path.relative_to(root) if path.is_relative_to(root) else path
-    logger.info("event=snapshot_written path=%s rows=%d", shown.as_posix(), rows)
+    logger.info("event=snapshot_written path=%r rows=%d", shown.as_posix(), rows)
 
 
-def _write_snapshots() -> None:
+def _write_snapshots() -> bool:
+    """Save the live prices and the D4 cache as a fixture pair; False, logged, on failure."""
     loaded = load_prices()
     if loaded.prices is None or loaded.as_of is None:
-        logger.error("event=snapshot_failed reason=%s", loaded.error)
-        return
-    if _read(config.RIN_CACHE) is None:
-        logger.error("event=snapshot_failed reason=no D4 cache at %s", config.RIN_CACHE.name)
-        return
+        logger.error("event=snapshot_failed reason=%r", loaded.error)
+        return False
+    if read_d4_csv(config.RIN_CACHE) is None:
+        logger.error("event=snapshot_failed reason=%r", f"no D4 cache at {config.RIN_CACHE.name}")
+        return False
     as_of = loaded.as_of.isoformat()
-    FIXTURES.mkdir(parents=True, exist_ok=True)
     prices_path = price_snapshot(as_of)
-    write_snapshot(loaded.prices, prices_path)
-    _log_written(prices_path, len(loaded.prices))
-    # A byte copy, so the snapshot parses to the same D4 values as the cache.
     d4_path = d4_snapshot(as_of)
-    shutil.copyfile(config.RIN_CACHE, d4_path)
+    try:
+        prices_path.parent.mkdir(parents=True, exist_ok=True)
+        write_snapshot(loaded.prices, prices_path)
+        # A byte copy, so the snapshot parses to the same D4 values as the cache.
+        shutil.copyfile(config.RIN_CACHE, d4_path)
+    except OSError as exc:
+        logger.error("event=snapshot_failed reason=%r", str(exc))
+        return False
+    _log_written(prices_path, len(loaded.prices))
     _log_written(d4_path, len(pd.read_csv(d4_path)))
+    return True
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Log each README figure, from the live data or from the committed snapshot."""
+def main(argv: list[str] | None = None) -> int:
+    """Log each README figure, from the live data or from the committed snapshot.
+
+    Returns the exit status: 1 after a logged failure, else 0.
+    """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse(argv)
     if args.write_snapshot:
-        _write_snapshots()
-        return
+        return 0 if _write_snapshots() else 1
     if args.snapshot:
-        prices = read_snapshot(price_snapshot())
-        d4 = _read(d4_snapshot())
+        try:
+            prices = read_snapshot(price_snapshot())
+        except DataLoaderError as exc:
+            logger.error("event=readme_figures_failed reason=%r", str(exc))
+            return 1
+        d4 = read_d4_csv(d4_snapshot())
         as_of, rin_source = SNAPSHOT_DATE, "snapshot"
     else:
         loaded = load_prices()
         if loaded.prices is None:
-            logger.error("event=readme_figures_failed reason=%s", loaded.error)
-            return
+            logger.error("event=readme_figures_failed reason=%r", loaded.error)
+            return 1
         rins = load_d4()
         prices, d4 = loaded.prices, rins.prices
         as_of, rin_source = str(loaded.as_of), rins.source
@@ -258,7 +277,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     for name, value in compute(prices, d4).items():
         logger.info("event=readme_figure name=%s value=%s", name, value)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -5,9 +5,9 @@ a delivery-period move never counts as a change. The differences are taken on th
 full table in row order, never after dropping flagged rows, which would join two
 clean sessions across a roll.
 
-The risk is a filtered historical simulation on a long board crush of
-``NOTIONAL_TONNES`` (long meal and oil, short soybeans). Each clean change is divided
-by its EWMA volatility forecast, made from the changes before it only; the
+The risk is a filtered historical simulation on the crusher's margin on
+``NOTIONAL_TONNES``, unhedged (long meal and oil, short soybeans). Each clean change
+is divided by its EWMA volatility forecast, made from the changes before it only; the
 standardised changes of the past ``LOOKBACK_YEARS`` are the scenarios, scaled to the
 forecast for the next change. A plain 5-year window weighs calm and volatile years
 the same, so its exceptions cluster when the regime shifts. ``var_backtest`` checks
@@ -134,7 +134,8 @@ class SampleBias:
 
 @dataclass(frozen=True)
 class RiskSummary:
-    """1-day risk of a long board crush, by filtered historical simulation.
+    """1-day risk of the crusher's margin on 1,000 t, unhedged (long meal and oil, short
+    soybeans), by filtered historical simulation.
 
     ``vol_20`` and ``vol_1y`` are plain daily standard deviations in USD/t, not
     annualised; ``vol_ewma`` is the EWMA forecast for the next change, which scales

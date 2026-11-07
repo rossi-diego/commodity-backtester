@@ -23,14 +23,14 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
 | 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
 | 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
-| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over the last 20 clean changes and 1 year, 1-day VaR 95% and ES 97.5% (filtered historical simulation, backtested) on a long 1,000 t board crush, and each leg's share of the ES | USD per tonne and USD |
+| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over the last 20 clean changes and 1 year, 1-day VaR 95% and ES 97.5% (filtered historical simulation, backtested) on a 1,000 t crusher's margin, unhedged, and each leg's share of the ES | USD per tonne and USD |
 
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
 - **History**: the series over 5 years, 10 years or all of it, with roll and delivery sessions in grey.
 - **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. This year's legend entry reads "2026 (to date)", and the month in progress is a hollow dot, not joined to the line.
 
-The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap after the RIN is drawn in cyan, a colour no other line uses. The third card always shows both numbers, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
+The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap after the RIN is drawn in cyan, a colour no other line uses. The third card shows the gap before the RIN and the D4 price that would close it, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
 
 ## How it is calculated
 
@@ -45,7 +45,7 @@ The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap
 
 Unit conversions use the exact definitions (1 lb = 0.45359237 kg, 1 US gallon = 3.785411784 L) and are tested in `tests/test_constants.py`.
 
-On 2026-10-27 the crush margin was 88.43 USD/t (2.41 USD/bu), oil was 50% of the product value, and soybean oil cost 1,324 USD per m³ of biodiesel against 1,262 USD/m³ for heating oil. `tests/test_margins.py` asserts these figures from that day's closes.
+On 2026-10-27, a session pinned in `tests/test_margins.py`, the crush margin was 88.43 USD/t (2.41 USD/bu), oil was 50% of the product value, and soybean oil cost 1,324 USD per m³ of biodiesel against 1,262 USD/m³ for heating oil. The test asserts these figures from that day's closes.
 
 The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per m³ of biodiesel. Yearly averages of the oil cost against heating oil, in USD/m³, on clean sessions, with held RIN prices excluded:
 
@@ -58,6 +58,8 @@ The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per 
 | 2025 | +361 | −2 |
 | 2026 (to date) | +368 | −288 |
 
+On 2026-11-05 the oil cost exceeds heating oil by 85 USD/m³, so a D4 RIN of 0.22 USD would close the feedstock gap, before conversion costs, against 2.09 USD at the last EPA week.
+
 The D4, yearly, roll and risk figures in this README come from `python -m scripts.readme_figures --snapshot` (data to 2026-11-05, committed in tests/fixtures) and are asserted by tests/test_readme_figures.py.
 
 The D4 does not simply close the gap, because the gap is not the producer's whole bill. A negative value after the RIN is what is left to pay for conversion (methanol, energy, the plant) and for margin. Through 2024 the $1/gal blenders' tax credit (BTC, 264 USD/m³) paid part of the gap ([AFDC](https://afdc.energy.gov/laws/395)), and from 2025 the 45Z clean fuel production credit replaced it, with a value that depends on carbon intensity ([IRS](https://www.irs.gov/credits-deductions/clean-fuel-production-credit)). LCFS credits pay in some states ([AFDC](https://afdc.energy.gov/laws/6308)), and renewable diesel, at 1.7 RINs per gallon ([40 CFR 80.1415](https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-80/subpart-M/section-80.1415)), is the marginal gallon.
@@ -66,7 +68,7 @@ On 2026-11-05 the RIN value exceeds the feedstock gap by about 743 USD/m³, usin
 
 ## Risk on a notional crush
 
-Under the crush chart, one row gives the 1-day risk of a long board crush of 1,000 t of soybeans: long meal and oil, short soybeans. It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
+Under the crush chart, one row gives the 1-day risk of the crusher's margin on 1,000 t, unhedged (long meal and oil, short soybeans). It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
 
 | Measure | Formula |
 |---|---|
@@ -163,7 +165,7 @@ src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (
    + src/styles.py (page CSS) -> app.py (Streamlit page)
 ```
 
-Logs use `key=value` fields, for example `event=data_load source=cache rows=6711 as_of=2026-10-30`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
+Logs use `key=value` fields, for example `event=data_load source=cache rows=6714 as_of=2026-11-05`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
 
 ## Quick start
 

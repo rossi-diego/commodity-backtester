@@ -152,7 +152,7 @@ class TestLoad:
         cache, seed = paths
         cache.write_text(text, encoding="utf-8")
         with caplog.at_level("WARNING", logger="src.rins"):
-            assert rins._read(cache) is None
+            assert rins.read_d4_csv(cache) is None
         assert "rin_unreadable" in caplog.text
 
         _write(seed)
@@ -160,6 +160,22 @@ class TestLoad:
             result = rins.load_d4()
         assert result.source == "seed"
         assert result.as_of == WEEKS[-1].date()
+
+    def test_the_cache_write_creates_its_directory(self, tmp_path) -> None:
+        path = tmp_path / "new" / "x" / "rin.csv"
+        series = rins.parse_rows(_rows())
+        rins._write(series, path)
+        back = rins.read_d4_csv(path)
+        assert back is not None
+        pd.testing.assert_series_equal(back, series, check_names=False, check_freq=False)
+
+    def test_free_text_is_logged_quoted(self, paths, caplog) -> None:
+        with (
+            patch("src.rins._fetch_rows", side_effect=OSError("EPA's engine said 'busy'")),
+            caplog.at_level("WARNING", logger="src.rins"),
+        ):
+            rins.load_d4()
+        assert "event=rin_load_failed reason=\"EPA's engine said 'busy'\"" in caplog.text
 
     def test_a_failed_cache_write_keeps_the_result(self, paths) -> None:
         with (
@@ -217,7 +233,7 @@ class TestEngine:
         ):
             asyncio.run(rins._fetch())
 
-    def test_an_empty_page_ends_the_read(self) -> None:
+    def test_an_empty_page_ends_theread_d4_csv(self) -> None:
         socket = _FakeSocket(_rows()[:3])
         original = socket.send
 

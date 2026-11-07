@@ -7,17 +7,23 @@ no network calls are made and the production cache file is never touched.
 from __future__ import annotations
 
 import datetime
+import importlib
+import logging
+import pathlib
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from scripts.readme_figures import price_snapshot
 from src import config as dl_config
+from src import data_loader
 from src.constants import commodities_dict
 from src.data_loader import (
+    MAX_ABS_LOG_RETURN,
+    MAX_CACHE_RATIO_DRIFT,
     DataLoaderError,
-    _response_problems,
     load_prices,
     read_snapshot,
     write_snapshot,
@@ -408,6 +414,28 @@ class TestWarmResponse:
         ):
             yahoo_quotes()
 
+    def test_write_creates_the_cache_directory(self, tmp_path):
+        path = tmp_path / "new" / "x" / "prices.parquet"
+        data_loader._write_cache(_full_cached_df(), path)
+        assert path.exists()
+
+    def test_a_failed_directory_is_logged_not_raised(self, tmp_path, caplog):
+        blocker = tmp_path / "file"
+        blocker.write_text("not a directory")
+        with caplog.at_level(logging.WARNING, logger="src.data_loader"):
+            data_loader._write_cache(_full_cached_df(), blocker / "x" / "prices.parquet")
+        assert any("event=cache_write_failed" in r.getMessage() for r in caplog.records)
+
+    def test_free_text_is_logged_quoted(self, cache_file, caplog):
+        reason = 'Yahoo said "slow down" twice'
+        with (
+            patch("src.data_loader.yf.download", side_effect=RuntimeError(reason)),
+            caplog.at_level(logging.ERROR, logger="src.data_loader"),
+        ):
+            load_prices()
+        expected = repr(f"Yahoo Finance request failed: {reason}")
+        assert f"event=data_load_failed reason={expected}" in caplog.text
+
     def test_write_is_atomic(self, cache_file, stale_cache, monkeypatch):
         """A failed write leaves the original cache intact and no temporary file behind."""
         before = cache_file.read_bytes()
@@ -424,11 +452,60 @@ class TestWarmResponse:
         assert not df.empty
 
 
+class TestPriceChecks:
+    """A unit slip or a rescaled column is rejected, and the cache is kept."""
+
+    def _rejected_for(self, cache_file, stale_cache, response, problem: str) -> None:
+        problems = data_loader._response_problems(response, stale_cache, datetime.date(2000, 1, 1))
+        assert problem in problems
+        TestWarmResponse()._assert_rejected(cache_file, stale_cache, response)
+
+    def test_a_zero_price_is_rejected(self, cache_file, stale_cache):
+        response = _extended(stale_cache)
+        response.iloc[-5, 2] = 0.0
+        self._rejected_for(
+            cache_file, stale_cache, response, f"{NAMES[2]} has non-positive or non-finite prices"
+        )
+
+    def test_an_infinite_price_is_rejected(self, cache_file, stale_cache):
+        response = _extended(stale_cache)
+        response.iloc[-5, 0] = np.inf
+        self._rejected_for(
+            cache_file, stale_cache, response, f"{NAMES[0]} has non-positive or non-finite prices"
+        )
+
+    def test_one_row_in_cents_is_a_unit_jump(self, cache_file, stale_cache):
+        response = _extended(stale_cache)
+        response.iloc[-5, 1] *= 100
+        self._rejected_for(cache_file, stale_cache, response, f"{NAMES[1]} has a unit jump")
+
+    def test_a_column_rescaled_as_a_whole_is_caught_by_the_cache(self, cache_file, stale_cache):
+        response = _extended(stale_cache)
+        response[NAMES[3]] *= 100
+        # Rescaled end to end, the column has no jump of its own.
+        assert not np.log(response[NAMES[3]]).diff().abs().max() > MAX_ABS_LOG_RETURN
+        self._rejected_for(
+            cache_file, stale_cache, response, f"{NAMES[3]} is rescaled against the cache"
+        )
+
+    def test_a_small_revision_is_not_a_rescaling(self):
+        cached = _full_cached_df()
+        response = _extended(cached) * (1 + MAX_CACHE_RATIO_DRIFT / 2)
+        assert data_loader._response_problems(response, cached, datetime.date(2000, 1, 1)) == []
+
+    def test_the_committed_snapshot_passes(self):
+        """26 years of real closes: the largest daily log return is about 0.25."""
+        snapshot = data_loader.read_snapshot(price_snapshot())
+        start = datetime.date(2000, 1, 1)
+        assert data_loader._response_problems(snapshot, None, start) == []
+        assert data_loader._response_problems(snapshot, snapshot, start) == []
+
+
 class TestImperfectCache:
     """A missing or empty column in the cache imposes no constraint on the response."""
 
     def _problems(self, cached: pd.DataFrame, response: pd.DataFrame) -> list[str]:
-        return _response_problems(response, cached, datetime.date(2000, 1, 1))
+        return data_loader._response_problems(response, cached, datetime.date(2000, 1, 1))
 
     def test_column_missing_from_cache_does_not_raise(self):
         cached = _full_cached_df().drop(columns="Soybean Meal")
@@ -462,6 +539,13 @@ class TestImperfectCache:
 # ---------------------------------------------------------------------------
 # load_prices
 # ---------------------------------------------------------------------------
+
+
+def test_importing_config_creates_no_directory(monkeypatch):
+    made: list[pathlib.Path] = []
+    monkeypatch.setattr(pathlib.Path, "mkdir", lambda self, *a, **k: made.append(self))
+    importlib.reload(dl_config)
+    assert made == []
 
 
 class TestLoadPrices:

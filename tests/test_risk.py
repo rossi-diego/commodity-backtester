@@ -15,7 +15,6 @@ from src.risk import (
     MIN_CHANGES,
     NOTIONAL_TONNES,
     WORST_DAYS,
-    _ewma_variance,
     christoffersen_independence,
     clean_changes,
     excluded_changes,
@@ -288,7 +287,7 @@ def _series(values: np.ndarray, start: str = "2010-01-04") -> pd.Series:
 def test_ewma_of_a_constant_size_is_that_size() -> None:
     c = 2.5
     x = c * np.where(np.arange(200) % 2 == 0, 1.0, -1.0)
-    s2 = _ewma_variance(x)
+    s2 = engine._ewma_variance(x)
     assert len(s2) == len(x) + 1
     assert np.isnan(s2[:EWMA_SEED]).all()
     assert np.sqrt(s2[EWMA_SEED:]) == pytest.approx(c)
@@ -298,12 +297,14 @@ def test_ewma_uses_only_earlier_changes() -> None:
     x = np.random.default_rng(4).normal(0, 1, 100)
     shocked = x.copy()
     shocked[60] = 50.0
-    assert np.array_equal(_ewma_variance(x)[:61], _ewma_variance(shocked)[:61], equal_nan=True)
-    assert _ewma_variance(shocked)[61] > _ewma_variance(x)[61]
+    assert np.array_equal(
+        engine._ewma_variance(x)[:61], engine._ewma_variance(shocked)[:61], equal_nan=True
+    )
+    assert engine._ewma_variance(shocked)[61] > engine._ewma_variance(x)[61]
 
 
 def test_ewma_under_the_seed_is_all_nan() -> None:
-    assert np.isnan(_ewma_variance(np.ones(EWMA_SEED - 1))).all()
+    assert np.isnan(engine._ewma_variance(np.ones(EWMA_SEED - 1))).all()
 
 
 def test_kupiec_pof() -> None:

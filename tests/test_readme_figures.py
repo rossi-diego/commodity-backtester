@@ -6,6 +6,7 @@ from __future__ import annotations
 import datetime
 import logging
 import math
+import re
 import shutil
 import string
 from typing import Any
@@ -18,12 +19,13 @@ from scripts import readme_figures
 from src import config
 from src.data_loader import LoadResult, read_snapshot
 from src.margins import add_rins, gap_table
-from src.rins import RinResult, _read
+from src.rins import RinResult, read_d4_csv
+from tests.test_margins import PINNED_DATE
 
 
 @pytest.fixture(scope="module")
 def seed() -> pd.Series:
-    series = _read(config.RIN_SEED)
+    series = read_d4_csv(config.RIN_SEED)
     assert series is not None
     return series
 
@@ -40,6 +42,9 @@ def _expected_keys(last_year: int) -> set[str]:
         "d4_usd_per_rin",
         "d4_usd_per_m3",
         "btc_usd_per_m3",
+        "d4_breakeven_date",
+        "latest_gap",
+        "rin_break_even_usd",
         "latest_after_rin",
         "latest_after_rin_date",
         "latest_after_rin_held",
@@ -141,7 +146,7 @@ def test_main_logs_every_figure(synthetic_prices, seed, caplog, capsys) -> None:
         patch.object(readme_figures, "load_d4", return_value=RinResult(seed, "seed")),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main([])
+        assert readme_figures.main([]) == 0
     lines = _figure_lines(caplog)
     assert len(lines) == len(_expected_keys(synthetic_prices.index.max().year))
     assert any("name=btc_usd_per_m3 value=264" in line for line in lines)
@@ -154,7 +159,14 @@ def test_main_logs_a_load_failure(caplog) -> None:
         patch.object(readme_figures, "load_prices", return_value=failed),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main([])
+        assert readme_figures.main([]) == 1
+    assert any("event=readme_figures_failed" in r.getMessage() for r in caplog.records)
+
+
+def test_main_returns_1_on_an_unreadable_snapshot(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(readme_figures, "FIXTURES", tmp_path)
+    with caplog.at_level(logging.INFO, logger=readme_figures.__name__):
+        assert readme_figures.main(["--snapshot"]) == 1
     assert any("event=readme_figures_failed" in r.getMessage() for r in caplog.records)
 
 
@@ -165,7 +177,7 @@ def test_main_snapshot_needs_no_live_data(caplog, capsys) -> None:
         patch.object(readme_figures, "load_d4", side_effect=offline),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main(["--snapshot"])
+        assert readme_figures.main(["--snapshot"]) == 0
     lines = _figure_lines(caplog)
     assert len(lines) == len(EXPECTED)
     assert "event=readme_figure name=risk_var_usd value=6114" in lines
@@ -183,10 +195,10 @@ def test_write_snapshot_round_trips(synthetic_prices, tmp_path, monkeypatch, cap
         patch.object(readme_figures, "load_prices", return_value=loaded),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main(["--write-snapshot"])
+        assert readme_figures.main(["--write-snapshot"]) == 0
         prices_path = readme_figures.price_snapshot(as_of.isoformat())
         first = prices_path.read_bytes()
-        readme_figures.main(["--write-snapshot"])
+        assert readme_figures.main(["--write-snapshot"]) == 0
     assert prices_path.read_bytes() == first
     back = read_snapshot(prices_path)
     pd.testing.assert_frame_equal(
@@ -213,9 +225,28 @@ def test_write_snapshot_logs_what_is_missing(
         patch.object(readme_figures, "load_prices", return_value=loaded),
         caplog.at_level(logging.INFO, logger=readme_figures.__name__),
     ):
-        readme_figures.main(["--write-snapshot"])
+        assert readme_figures.main(["--write-snapshot"]) == 1
     assert any("event=snapshot_failed" in r.getMessage() for r in caplog.records)
     assert not (tmp_path / "fixtures").exists()
+
+
+def test_a_failed_snapshot_write_returns_1(synthetic_prices, tmp_path, monkeypatch, caplog) -> None:
+    rin_cache = tmp_path / "rin_d4.csv"
+    shutil.copyfile(readme_figures.d4_snapshot(), rin_cache)
+    monkeypatch.setattr(config, "RIN_CACHE", rin_cache)
+    monkeypatch.setattr(readme_figures, "FIXTURES", tmp_path / "new" / "fixtures")
+    loaded = LoadResult(synthetic_prices, synthetic_prices.index.max().date(), False, None)
+    with (
+        patch.object(readme_figures, "load_prices", return_value=loaded),
+        patch.object(readme_figures, "write_snapshot", side_effect=OSError('disk "full"')),
+        caplog.at_level(logging.INFO, logger=readme_figures.__name__),
+    ):
+        assert readme_figures.main(["--write-snapshot"]) == 1
+    failed = [r.getMessage() for r in caplog.records if "event=snapshot_failed" in r.getMessage()]
+    # Free text is repr-quoted, so the quotes inside the reason cannot end the field.
+    assert failed == ["event=snapshot_failed reason='disk \"full\"'"]
+    assert (tmp_path / "new" / "fixtures").is_dir()
+    assert not any("event=snapshot_written" in r.getMessage() for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +273,9 @@ EXPECTED: dict[str, Any] = {
     "gap_after_2025": -2,
     "gap_before_2026": 368,
     "gap_after_2026": -288,
+    "d4_breakeven_date": "2026-11-05",
+    "latest_gap": 85,
+    "rin_break_even_usd": 0.22,
     "latest_after_rin": -743,
     "latest_after_rin_date": "2026-11-05",
     "latest_after_rin_held": True,
@@ -313,6 +347,9 @@ README_QUOTES = [
         for year in range(readme_figures.FIRST_YEAR, 2026)
     ),
     "| 2026 (to date) | {gap_before_2026:+} | {gap_after_2026:+} |",
+    "On {d4_breakeven_date} the oil cost exceeds heating oil by {latest_gap} USD/m³, so a D4 RIN "
+    "of {rin_break_even_usd} USD would close the feedstock gap, before conversion costs, "
+    "against {d4_usd_per_rin} USD at the last EPA week.",
     "BTC, {btc_usd_per_m3} USD/m³",
     "{crush_flagged_share:.0%} of crush sessions",
     "they hold {top_moves_flagged} of the 20 largest daily moves",
@@ -346,6 +383,7 @@ README_QUOTES = [
     "method gives {risk_combined_var_usd:,} USD against {risk_var_usd:,}, and the clean VaR, "
     "tested on the {risk_excluded_tested} left-out changes, has {risk_excluded_exceptions} "
     "exceptions ({risk_excluded_rate_pct}%, Kupiec p {risk_excluded_kupiec_p}).",
+    "`event=data_load source=cache rows={snapshot_rows} as_of={data_date}`",
 ]
 
 
@@ -358,7 +396,8 @@ class _ReadmeFormat(string.Formatter):
 
 
 def _quotes(figures: dict[str, Any]) -> list[str]:
-    return [_ReadmeFormat().format(quote, **figures) for quote in README_QUOTES]
+    values = figures | {"snapshot_rows": SNAPSHOT_ROWS}
+    return [_ReadmeFormat().format(quote, **values) for quote in README_QUOTES]
 
 
 @pytest.fixture(scope="module")
@@ -377,7 +416,7 @@ def test_snapshot_shape(snapshot) -> None:
 
 
 def test_snapshot_reproduces_readme_figures(snapshot) -> None:
-    d4 = _read(readme_figures.d4_snapshot())
+    d4 = read_d4_csv(readme_figures.d4_snapshot())
     assert readme_figures.compute(snapshot, d4) == EXPECTED
 
 
@@ -387,8 +426,21 @@ def test_readme_quotes_the_figures() -> None:
     assert not missing
 
 
+def test_every_readme_date_is_traceable() -> None:
+    """A date in the README is a figure, the snapshot's date or the session pinned by a test."""
+    readme = (config.PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    known = {value for value in EXPECTED.values() if isinstance(value, str)}
+    known |= {readme_figures.SNAPSHOT_DATE, PINNED_DATE}
+    dates = set(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", readme))
+    assert dates
+    assert dates <= known, sorted(dates - known)
+
+
 def test_readme_claims_hold_on_the_snapshot() -> None:
     """Sentences the README states in words, not figures."""
+    # "the oil cost exceeds heating oil", and a positive break-even.
+    assert EXPECTED["latest_gap"] > 0
+    assert EXPECTED["rin_break_even_usd"] > 0
     assert EXPECTED["risk_combined_var_usd"] < EXPECTED["risk_var_usd"]
     assert EXPECTED["risk_es_christoffersen_p"] < 0.05 <= EXPECTED["risk_christoffersen_p"]
     assert EXPECTED["risk_z2_p"] >= 0.05

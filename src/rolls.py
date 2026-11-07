@@ -18,6 +18,7 @@ session early or late around a holiday.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Final
 
 import pandas as pd
@@ -61,7 +62,9 @@ def monthly_last_trade(year: int, month: int) -> pd.Timestamp:
 
 
 def front_contracts(
-    dates: pd.DatetimeIndex, months: tuple[int, ...], last_trade: object
+    dates: pd.DatetimeIndex,
+    months: tuple[int, ...],
+    last_trade: Callable[[int, int], pd.Timestamp],
 ) -> pd.DataFrame:
     """Return the front contract on each date: its year, month and last trading day.
 
@@ -74,7 +77,7 @@ def front_contracts(
         )
     first, last = dates.min().year - 1, dates.max().year + 2
     contracts = sorted(
-        (last_trade(year, month), year, month)  # type: ignore[operator]
+        (last_trade(year, month), year, month)
         for year in range(first, last + 1)
         for month in months
     )

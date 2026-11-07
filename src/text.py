@@ -59,6 +59,15 @@ READING_RIN: Final[str] = (
     "oil cost. Dashed: EPA price held. Dotted: before the RIN."
 )
 
+# The third card's detail and caption. ``break_even`` is filled with the break-even and the
+# latest D4 price, in USD per RIN, and " (held)" when the EPA price is held.
+GAP_CARD: Final[dict[str, str]] = {
+    "break_even": "Break-even D4 RIN ${be:.2f} before conversion costs; latest D4 ${d4:.2f}{held}.",
+    "no_rin": "Heating oil alone covers the oil: no RIN needed before conversion costs.",
+    "no_d4": "D4 RIN prices could not be loaded.",
+    "scope": "Feedstock only: before conversion costs, BTC/45Z and LCFS.",
+}
+
 # Under the crush chart's risk strip, at most 30 words with any RISK_EFFECT. The effect
 # is what the left-out changes do to the VaR, picked from the data by ``cards.risk_effect``.
 RISK_NOTE: Final[str] = (
@@ -180,9 +189,9 @@ FULL_METHOD: Final[str] = (
     "flags leave mostly the second half of the month. Ranks count clean sessions, so months "
     "without a delivery period weigh more. Part of the seasonal shape is the switch to "
     "new-crop contracts.\n\n"
-    "**Risk.** Filtered historical simulation on a long 1,000 t board crush, front-month "
-    "closes, not a hedge book. Each 1-day change between consecutive clean sessions in the past "
-    "5 years is divided by its EWMA volatility (λ = 0.94), and VaR and ES are the tails of those "
+    "**Risk.** Filtered historical simulation on the crusher's margin on 1,000 t, unhedged "
+    "(long meal and oil, short soybeans), front-month closes, not a hedge book. Each 1-day "
+    "change between consecutive clean sessions in the past 5 years is divided by its EWMA volatility (λ = 0.94), and VaR and ES are the tails of those "
     "standardised changes times today's EWMA volatility. Unfiltered, a 5-year window weighs calm "
     "and volatile years the same, so its exceptions cluster. The backtest forecasts each change "
     "only from the changes before it. Delivery-period and roll changes are left out; see the "

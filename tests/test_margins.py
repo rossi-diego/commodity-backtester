@@ -11,6 +11,7 @@ from src.margins import (
     CRUSH_COLUMNS,
     GAP_COLUMNS,
     add_rins,
+    break_even_d4,
     crush_table,
     gap_table,
     per_gallon,
@@ -18,7 +19,8 @@ from src.margins import (
     to_metric,
 )
 
-# Closes on 2026-10-27, in exchange units.
+# The session the README quotes, and its closes in exchange units.
+PINNED_DATE = "2026-10-27"
 CLOSE = {BEANS: 1229.25, MEAL: 334.6, OIL: 66.71, DIESEL: 4.7752}
 
 
@@ -29,7 +31,7 @@ def _frame(rows: dict[str, list[float]], start: str = "2026-10-26") -> pd.DataFr
 
 @pytest.fixture()
 def one_day() -> pd.DataFrame:
-    return pd.DataFrame({k: [v] for k, v in CLOSE.items()}, index=pd.DatetimeIndex(["2026-10-27"]))
+    return pd.DataFrame({k: [v] for k, v in CLOSE.items()}, index=pd.DatetimeIndex([PINNED_DATE]))
 
 
 class TestCrush:
@@ -117,6 +119,16 @@ class TestRins:
         out = add_rins(table, d4)
         assert out.loc["2026-02-02":"2026-03-20", "after_rin"].isna().all()
         assert not out["rin_held"].any()
+
+    @pytest.mark.parametrize("gap", [85.29, -120.0, 1e-3, 829.0])
+    def test_break_even_is_the_inverse_of_the_rin_value(self, gap) -> None:
+        assert rin_per_m3(break_even_d4(gap)) == pytest.approx(gap, abs=1e-9)
+
+    def test_break_even_on_the_snapshot_gap(self) -> None:
+        assert break_even_d4(0.0) == 0.0
+        assert break_even_d4(85.29) == pytest.approx(85.29 / (1.5 * 264.172), rel=1e-5)
+        assert f"{break_even_d4(85.29):.2f}" == "0.22"
+        assert break_even_d4(-10.0) < 0
 
     def test_per_gallon(self) -> None:
         assert per_gallon(264.172052) == pytest.approx(1.0)

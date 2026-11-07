@@ -5,7 +5,6 @@ from typing import Final
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 DATA_DIR: Final[Path] = PROJECT_ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
 
 # Parquet cache of daily closes. Git-ignored, rebuilt from Yahoo Finance when stale.
 YFINANCE_RAW: Final[Path] = DATA_DIR / "prices.parquet"
