@@ -161,6 +161,8 @@ Yahoo Finance's continuous `=F` series stay in the nearest contract until its la
 
 `src/rolls.py` rebuilds approximate CBOT and NYMEX contract calendars and flags every session where a leg is in its delivery period or has just switched contract. Flagged sessions are drawn as a thin grey line and left out of every range and percentile: 42% of crush sessions. Measured on 2000 to 2026, they hold 19 of the 20 largest daily moves in the crush, including the record low of −1.82 USD/bu on 2008-09-12, which was an expiring September contract and not a real margin.
 
+During a delivery period the latest `=F` session is the expiring contract, so the cards, the section sentences and the levels beside each chart use the contracts a crusher who never takes delivery holds instead: the first contract of each leg whose first notice is after the session (in early November, January beans and December products). `src/deferred.py` fetches only that session's closes from Yahoo (for example `ZSF27.CBT`), because Yahoo drops expired contracts, so the history stays on `=F`. The held level is ranked against the clean history but joins none of it, and the chart marks it with a hollow dot named after the pair. A held contract that is also the `=F` front month must close within 0.5% of it, and a deferred one within 8%, or the session is rejected. If the fetch fails after three calls, the page keeps the last clean session and says since when the series is in delivery.
+
 From about 15 October, November beans against December products is the CME board pair. Two stretches are not: late September (Nov beans, Oct products) and the second half of November (Jan beans, Dec products); the rest of each off-pair stretch is already flagged as product delivery. Those sessions are kept, because their daily changes between clean sessions match the board pair's (median 0.86 against 0.89 USD/t), but their level includes a product calendar spread.
 
 ## D4 RIN prices
@@ -193,7 +195,8 @@ data/prices.parquet  (local, git-ignored)
    |  load_prices() -> LoadResult, cached for one hour by the app; a failure is never cached
    v
 src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg drops the session
-src/rolls.py     contract calendars: delivery and switch flags
+src/rolls.py     contract calendars: delivery and switch flags, held contracts
+src/deferred.py  latest closes of the held contracts while =F is in delivery
 src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
 src/seasonal.py  latest clean reading, 5-year percentile, monthly averages by year
 src/risk.py      clean daily changes; filtered 1-day VaR and ES, backtests, ES by leg
@@ -218,6 +221,7 @@ soybean-crush-margin/
 │   ├── constants.py            # Tickers, units, crush and biodiesel factors with sources
 │   ├── data_loader.py          # Yahoo Finance fetch, response validation, Parquet cache
 │   ├── rolls.py                # Contract calendars, delivery and switch flags
+│   ├── deferred.py             # Latest closes of the held contracts during delivery
 │   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
 │   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions

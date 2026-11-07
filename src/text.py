@@ -113,7 +113,7 @@ METHOD: Final[list[MethodCard]] = [
             (
                 "Excluded",
                 "delivery-period and switch-day sessions are drawn grey and left out of every "
-                "rank and monthly average: about 4 in 10 crush sessions.",
+                "rank and monthly average. In delivery, the cards use the next contracts.",
             ),
             (
                 "Pairs",

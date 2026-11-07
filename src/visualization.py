@@ -83,6 +83,7 @@ def history_figure(
     zero_labels: tuple[str, str] | None = None,
     hover: dict[str, pd.Series] | None = None,
     y_dtick: float | None = None,
+    latest: tuple[str, pd.Timestamp, float] | None = None,
 ) -> go.Figure:
     """A metric over time, with roll and delivery sessions drawn as a thin grey line.
 
@@ -90,6 +91,8 @@ def history_figure(
     ``held`` marks the sessions whose value rests on a carried-forward input; they are
     drawn dashed and named. ``hover`` adds component levels to the tooltip of the main
     line. ``y_dtick`` fixes the step between y ticks; by default Plotly picks it.
+    ``latest`` adds a named hollow marker for a level the series does not hold, such as
+    the held contracts on a delivery session.
     """
     flags = flagged.reindex(values.index, fill_value=True).astype(bool)
     held_mask = (
@@ -130,6 +133,19 @@ def history_figure(
     clean = values[~flags]
     if not clean.empty:
         fig.add_trace(_dot(clean.index[-1:], clean.iloc[-1:], color))
+    if latest is not None:
+        label, date, value = latest
+        fig.add_trace(
+            go.Scatter(
+                x=[date],
+                y=[value],
+                mode="markers",
+                name=label,
+                cliponaxis=False,
+                hovertemplate=f"%{{x|%-d %b %Y}}<br>{label}: %{{y:,.{1 if percent else 0}f}}<extra></extra>",
+                marker={"size": 9, "color": SURFACE, "line": {"color": color, "width": 2}},
+            )
+        )
     fig.update_layout(**_layout())
     # Explicitly dates: Plotly infers the axis type from the first trace, the empty proxy.
     fig.update_xaxes(type="date", range=[values.index[0], values.index[-1]])

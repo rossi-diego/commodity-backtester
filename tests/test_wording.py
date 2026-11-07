@@ -10,7 +10,7 @@ from src.seasonal import Reading
 from src.wording import (
     after_rin_words,
     day,
-    latest_close_tag,
+    delivery_tag,
     month_sentence,
     previous_years,
     rank_clause,
@@ -75,12 +75,8 @@ class TestRinNote:
         assert rin_note(RinResult(None, "none"), LATEST) == ""
 
 
-class TestLatestCloseTag:
-    def test_flagged_close_is_shown(self) -> None:
-        assert latest_close_tag(_reading(), 74.03) == "5 Nov close $74/t, roll day"
-
-    def test_clean_latest_close_has_no_tag(self) -> None:
-        assert latest_close_tag(_reading(date="2026-11-05"), 74.03) == ""
+def test_delivery_tag_names_the_first_session_in_delivery() -> None:
+    assert delivery_tag(pd.Timestamp("2026-10-30")) == "In delivery since 30 Oct"
 
 
 class TestMonthSentence:

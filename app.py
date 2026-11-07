@@ -63,6 +63,7 @@ from src.cards import (
 )
 from src.constants import BUSHELS_PER_TONNE
 from src.data_loader import LoadResult, load_prices
+from src.deferred import Held, held_session
 from src.margins import add_rins, break_even_d4, crush_table, gap_table, per_gallon
 from src.rins import RinResult, load_d4
 from src.seasonal import (
@@ -70,8 +71,10 @@ from src.seasonal import (
     Reading,
     latest_reading,
     month_vs_average,
+    monthly_band,
     monthly_means,
     range_52w,
+    reading_at,
 )
 from src.styles import APP_CSS
 from src.text import (
@@ -90,7 +93,7 @@ from src.visualization import CRUSH, INK_SERIES, MONTHS, OIL, RIN, by_month_figu
 from src.wording import (
     after_rin_words,
     day,
-    latest_close_tag,
+    delivery_tag,
     month_sentence,
     previous_years,
     rank_clause,
@@ -143,6 +146,11 @@ def _load_rins() -> RinResult:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _held(prices: pd.DataFrame) -> Held | None:
+    return held_session(prices)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def _tables(prices: pd.DataFrame, d4: pd.Series | None) -> tuple[pd.DataFrame, pd.DataFrame]:
     return crush_table(prices), add_rins(gap_table(prices), d4)
 
@@ -164,6 +172,52 @@ def _median_5y(values: pd.Series, flagged: pd.Series, date: pd.Timestamp) -> flo
     return float(clean.median())
 
 
+@dataclass(frozen=True)
+class Now:
+    """What a card and its rail show: the latest clean session, or the held contracts.
+
+    ``row`` is the table row of ``reading.date``. When the ``=F`` series is in delivery and
+    the held contracts could be fetched, it comes from them and ``label`` names them; else
+    ``label`` is empty and ``since`` is the first session in delivery, if any.
+    """
+
+    reading: Reading
+    row: pd.Series
+    label: str = ""
+    since: pd.Timestamp | None = None
+
+    @property
+    def tag(self) -> str:
+        if self.label:
+            return self.label
+        return "" if self.since is None else delivery_tag(self.since)
+
+
+def _now(table: pd.DataFrame, column: str, held_row: pd.Series | None, label: str) -> Now | None:
+    """The reading of ``column``: on the held contracts when ``held_row`` is given."""
+    if held_row is not None:
+        date = pd.Timestamp(str(held_row.name))
+        reading = reading_at(table[column], table["flagged"], date, float(held_row[column]))
+        return None if reading is None else Now(reading, held_row, label)
+    reading = latest_reading(table[column], table["flagged"])
+    if reading is None:
+        return None
+    later = table.index[table.index > reading.date]
+    since = pd.Timestamp(later[0]) if len(later) else None
+    return Now(reading, cast(pd.Series, table.loc[reading.date]), since=since)
+
+
+def _versus(means: pd.DataFrame, now: Now) -> float | None:
+    """This month against the same month of the 5 years before: the month to date, or the
+    held level when there is one, against that month's average."""
+    date = now.reading.date
+    if not now.label:
+        versus = month_vs_average(means, date)
+        return None if versus is None else versus[0] - versus[1]
+    average = monthly_band(means, date.year)["average"].iloc[date.month - 1]
+    return None if pd.isna(average) else now.reading.value - float(average)
+
+
 # ---------------------------------------------------------------------------
 # Cards
 # ---------------------------------------------------------------------------
@@ -171,19 +225,19 @@ def _median_5y(values: pd.Series, flagged: pd.Series, date: pd.Timestamp) -> flo
 
 def _kpis(
     crush: pd.DataFrame,
-    gap: pd.DataFrame,
-    readings: dict[str, Reading | None],
+    nows: dict[str, Now | None],
     rins: RinResult,
 ) -> None:
-    reading = readings["crush"]
-    assert reading is not None
+    now = nows["crush"]
+    assert now is not None
+    reading = now.reading
     means, _ = monthly_means(crush["crush"], crush["flagged"])
-    versus = month_vs_average(means, reading.date)
+    versus = _versus(means, now)
     month = MONTHS[reading.date.month - 1]
     crush_caption = "Gross margin, before plant costs."
     if versus is not None:
         crush_caption = (
-            f"{usd(versus[0] - versus[1], 't', signed=True)} against the {month} average of "
+            f"{usd(versus, 't', signed=True)} against the {month} average of "
             f"{previous_years(reading.date.year)}. Gross, before plant costs."
         )
     cards = [
@@ -196,14 +250,14 @@ def _kpis(
             detail=f"${reading.value / BUSHELS_PER_TONNE:,.2f}/bu board crush · {day(reading.date)}",
             percentile=reading.percentile,
             caption=crush_caption,
-            tag=latest_close_tag(reading, float(crush["crush"].loc[reading.latest_date])),
+            tag=now.tag,
         )
     ]
-    share = readings["share"]
-    if share is None:
+    share_now = nows["share"]
+    if share_now is None:
         cards.append(Kpi("share", 2, "Oil share", "n/a", "", "No clean session yet.", None, ""))
     else:
-        row = cast(pd.Series, crush.loc[share.date])
+        share, row = share_now.reading, share_now.row
         median = _median_5y(crush["oil_share"], crush["flagged"], share.date)
         cards.append(
             Kpi(
@@ -220,15 +274,17 @@ def _kpis(
                     usd(row["oil_value"], "t"),
                     usd(row["meal_value"], "t"),
                 ),
+                tag=share_now.tag,
             )
         )
-    before = readings["gap"]
-    if before is None:
+    gap_now = nows["gap"]
+    if gap_now is None:
         cards.append(Kpi("gap", 3, "Oil cost vs diesel", "n/a", "", "Prices missing.", None, ""))
     else:
+        before = gap_now.reading
         detail = GAP_CARD["no_rin"] if before.value <= 0 else GAP_CARD["no_d4"]
         if before.value > 0 and rins.prices is not None:
-            held = " (held)" if bool(gap.loc[before.date, "rin_held"]) else ""
+            held = " (held)" if bool(gap_now.row["rin_held"]) else ""
             d4 = float(rins.prices.iloc[-1])
             detail = GAP_CARD["break_even"].format(be=break_even_d4(before.value), d4=d4, held=held)
         side = "dearer" if before.value >= 0 else "cheaper"
@@ -246,6 +302,7 @@ def _kpis(
                 percentile=before.percentile,
                 rank_of="before the RIN",
                 caption=f"{rin_note(rins, before.latest_date)}{GAP_CARD['scope']}",
+                tag=gap_now.tag,
             )
         )
     st.html(kpi_row_html(cards))
@@ -358,18 +415,32 @@ def _section(
             st.html(rail_html(WHAT[key], shown.reading, shown.today, title))
 
 
+def _marker(now: Now, scale: float = 1.0) -> tuple[str, pd.Timestamp, float] | None:
+    """The held level as a hollow marker on the history chart, when there is one."""
+    if not now.label:
+        return None
+    return now.label, now.reading.date, now.reading.value * scale
+
+
+def _on(now: Now) -> str:
+    """Names the held contracts in a section sentence."""
+    return f" ({now.label})" if now.label else ""
+
+
 @st.fragment
-def _crush_section(table: pd.DataFrame, reading: Reading) -> None:
+def _crush_section(table: pd.DataFrame, now: Now) -> None:
+    reading = now.reading
+
     def body(c: Controls) -> SectionBody:
         means, counts = monthly_means(table["crush"], table["flagged"])
-        versus = month_vs_average(means, reading.date)
+        versus = _versus(means, now)
         low, high = range_52w(table["crush"], table["flagged"], reading.date)
         month = MONTHS[reading.date.month - 1]
         today = [
             ("Per bushel (CME quote)", f"${reading.value / BUSHELS_PER_TONNE:,.2f}/bu"),
             (
                 f"Against a usual {month}",
-                "n/a" if versus is None else usd(versus[0] - versus[1], "t", signed=True),
+                "n/a" if versus is None else usd(versus, "t", signed=True),
             ),
             ("Past year, low to high", f"{usd(low, 't')} to {usd(high, 't')}"),
         ]
@@ -386,8 +457,9 @@ def _crush_section(table: pd.DataFrame, reading: Reading) -> None:
                     "Oil value": shown["oil_value"],
                     "Soybean cost": shown["beans"],
                 },
+                latest=_marker(now),
             )
-            sentence = f"{usd(reading.value, 't')} on {day(reading.date)}, {rank_clause(reading)}."
+            sentence = f"{usd(reading.value, 't')} on {day(reading.date)}{_on(now)}, {rank_clause(reading)}."
             return SectionBody(sentence, fig, READING_HISTORY["crush"], today)
         fig = by_month_figure(
             means,
@@ -413,11 +485,12 @@ def _crush_section(table: pd.DataFrame, reading: Reading) -> None:
 
 
 @st.fragment
-def _share_section(table: pd.DataFrame, reading: Reading) -> None:
+def _share_section(table: pd.DataFrame, now: Now) -> None:
     percent = table["oil_share"] * 100
+    reading = now.reading
 
     def body(c: Controls) -> SectionBody:
-        row = cast(pd.Series, table.loc[reading.date])
+        row = now.row
         today = [
             ("Oil value", usd(row["oil_value"], "t")),
             ("Meal value", usd(row["meal_value"], "t")),
@@ -433,10 +506,11 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
                 y_title="Oil share, %",
                 percent=True,
                 hover={"Oil value": shown["oil_value"], "Meal value": shown["meal_value"]},
+                latest=_marker(now, scale=100),
             )
             median = _median_5y(table["oil_share"], table["flagged"], reading.date)
             sentence = (
-                f"Oil is {reading.value:.0%} of the product value on {day(reading.date)}, "
+                f"Oil is {reading.value:.0%} of the product value on {day(reading.date)}{_on(now)}, "
                 f"against a 5-year median of {median:.0%}."
             )
             return SectionBody(sentence, fig, READING_HISTORY["share"], today)
@@ -466,11 +540,12 @@ def _share_section(table: pd.DataFrame, reading: Reading) -> None:
 
 
 @st.fragment
-def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None:
+def _gap_section(table: pd.DataFrame, now: Now, rins: RinResult) -> None:
     has_rins = bool(table["rin_value"].notna().any())
+    reading = now.reading
 
     def body(c: Controls) -> SectionBody:
-        row = cast(pd.Series, table.loc[reading.date])
+        row = now.row
         rin_row = "n/a"
         if has_rins and pd.notna(row["rin_shown"]):
             rin_row = usd(row["rin_shown"], "m³")
@@ -505,6 +580,7 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
                 hover={"Oil feedstock": shown["feedstock"], "Heating oil": shown["diesel"]},
                 # The RIN widens the range: fixed ticks keep zero and the gap legible.
                 y_dtick=250 if rin_on else None,
+                latest=None if rin_on else _marker(now),
             )
             if rin_on:
                 ranked = latest_reading(table[column], table["flagged"], unranked=table["rin_held"])
@@ -521,7 +597,7 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
             side = "more" if reading.value >= 0 else "less"
             sentence = (
                 f"The oil for 1 m³ of biodiesel costs {usd(abs(reading.value), 'm³')} {side} "
-                f"than 1 m³ of heating oil, {rank_clause(reading)}."
+                f"than 1 m³ of heating oil{_on(now)}, {rank_clause(reading)}."
             )
             return SectionBody(sentence, fig, READING_HISTORY["gap"], today)
         means, counts = monthly_means(table[column], flagged)
@@ -589,6 +665,32 @@ def _footer(loaded: LoadResult, rins: RinResult | None = None) -> None:
     )
 
 
+def _nows(
+    prices: pd.DataFrame, crush: pd.DataFrame, gap: pd.DataFrame, rins: RinResult
+) -> dict[str, Now | None]:
+    """Each section's reading, on the held contracts where the last ``=F`` session is in
+    delivery and they could be fetched, else on the last clean session."""
+    in_delivery = {
+        "crush": not crush.empty and bool(crush["flagged"].iloc[-1]),
+        "gap": not gap.empty and bool(gap["flagged"].iloc[-1]),
+    }
+    held = _held(prices) if any(in_delivery.values()) else None
+    crush_row = gap_row = None
+    if held is not None:
+        frame = pd.DataFrame([held.prices], index=pd.DatetimeIndex([held.date]))
+        if in_delivery["crush"]:
+            crush_row = crush_table(frame).iloc[0]
+        if in_delivery["gap"]:
+            gap_row = add_rins(gap_table(frame), rins.prices).iloc[0]
+    pair = held.pair if held is not None else ""
+    oil = f"{held.products} oil" if held is not None else ""
+    return {
+        "crush": _now(crush, "crush", crush_row, pair),
+        "share": _now(crush, "oil_share", crush_row, pair),
+        "gap": _now(gap, "gap", gap_row, oil),
+    }
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Soybean Crush Margin",
@@ -617,12 +719,8 @@ def main() -> None:
 
     rins = _load_rins()
     crush, gap = _tables(loaded.prices, rins.prices)
-    readings = {
-        "crush": latest_reading(crush["crush"], crush["flagged"]),
-        "share": latest_reading(crush["oil_share"], crush["flagged"]),
-        "gap": latest_reading(gap["gap"], gap["flagged"]),
-    }
-    if readings["crush"] is None:
+    nows = _nows(loaded.prices, crush, gap, rins)
+    if nows["crush"] is None:
         st.warning(
             "Soybean, meal or oil prices are missing, so the crush margin cannot be computed.",
             icon=":material/warning:",
@@ -630,17 +728,17 @@ def main() -> None:
         _footer(loaded)
         return
 
-    _kpis(crush, gap, readings, rins)
-    _crush_section(crush, readings["crush"])
-    if readings["share"] is not None:
-        _share_section(crush, readings["share"])
-    if readings["gap"] is None:
+    _kpis(crush, nows, rins)
+    _crush_section(crush, nows["crush"])
+    if nows["share"] is not None:
+        _share_section(crush, nows["share"])
+    if nows["gap"] is None:
         st.warning(
             "Soybean oil or heating oil prices are missing, so the feedstock gap is not shown.",
             icon=":material/warning:",
         )
     else:
-        _gap_section(gap, readings["gap"], rins)
+        _gap_section(gap, nows["gap"], rins)
     st.html(method_row_html(METHOD))
     with st.expander("Full methodology and sources"):
         st.markdown(FULL_METHOD.replace("$", "\\$"))

@@ -12,6 +12,7 @@ from src.seasonal import (
     monthly_band,
     monthly_means,
     range_52w,
+    reading_at,
     yearly_means,
 )
 
@@ -192,3 +193,25 @@ def test_range_52w_uses_clean_sessions_of_the_last_year() -> None:
     low, high = range_52w(values, flagged, values.index[-1])
     assert high == values.iloc[-1]
     assert low == values.loc["2025-10-27":].iloc[0]
+
+
+class TestReadingAt:
+    def test_a_level_the_series_does_not_hold_is_ranked_against_clean_history(self) -> None:
+        values = _series("2020-01-01", "2026-11-06")
+        flagged = _clean(values)
+        flagged.iloc[-5:] = True
+        date = values.index[-1]
+        reading = reading_at(values, flagged, date, float(values.iloc[-6]) + 0.5)
+        assert reading is not None
+        assert reading.date == date
+        assert reading.value == float(values.iloc[-6]) + 0.5
+        assert reading.percentile == 100.0
+        assert reading.latest_date == date
+
+    def test_the_level_joins_no_history(self) -> None:
+        """The rank uses the 5 years before the date, never the level itself."""
+        values = _series("2020-01-01", "2026-11-06")
+        date = values.index[-1]
+        low = reading_at(values, _clean(values), date, -1.0)
+        assert low is not None
+        assert low.percentile == 0.0

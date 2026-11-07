@@ -203,6 +203,24 @@ class TestHistory:
         clean = crush.loc[~crush["flagged"], "crush"]
         assert dot.y[0] == pytest.approx(clean.iloc[-1])
 
+    def test_a_held_level_is_a_named_hollow_marker(self, tables) -> None:
+        crush, _ = tables
+        date = crush.index[-1]
+        fig = history_figure(
+            crush["crush"],
+            crush["flagged"],
+            name="Crush",
+            color=CRUSH,
+            y_title="USD",
+            latest=("Jan beans / Dec products", date, 71.04),
+        )
+        marker = _trace(fig, "Jan beans / Dec products")
+        assert marker.y[0] == pytest.approx(71.04)
+        assert pd.Timestamp(marker.x[0]) == date
+        assert marker.marker.line.color == CRUSH
+        assert marker.marker.color != CRUSH
+        assert "Jan beans / Dec products: %{y:,.0f}" in marker.hovertemplate
+
     def test_held_tail_is_dashed_and_joined(self, tables) -> None:
         _, gap = tables
         fig = _figures(tables)[1]
