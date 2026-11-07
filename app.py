@@ -227,13 +227,15 @@ def _kpis(
             detail = GAP_CARD["break_even"].format(be=break_even_d4(before.value), d4=d4, held=held)
         side = "dearer" if before.value >= 0 else "cheaper"
         gallon = _usd(per_gallon(before.value), "gal", signed=True, decimals=2)
+        # No-break spaces keep the date whole when the note wraps beside the value.
+        day = _day(before.date).replace(" ", " ")
         cards.append(
             Kpi(
                 key="gap",
                 number=3,
                 label="Oil cost vs diesel",
                 value=_usd(before.value, "m³", signed=True),
-                note=f"oil {side} · {gallon} · {_day(before.date)}",
+                note=f"oil {side} · {gallon} · {day}",
                 detail=detail,
                 percentile=before.percentile,
                 rank_of="before the RIN",

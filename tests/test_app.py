@@ -311,6 +311,15 @@ class TestGapCard:
         assert card.count("/m³") == 1
         assert "D4 week of 21 Sep (EPA, saved copy, 6 weeks old). Feedstock only:" in card
 
+    def test_note_date_never_breaks(self, snapshot_app) -> None:
+        snapshot_app.run()
+        gap_card = _kpis(snapshot_app).split("cm-kpi-gap", 1)[1]
+        note = re.search(r'class="cm-value">[^<]*<small>([^<]*)</small>', gap_card)
+        assert note is not None
+        day = note.group(1).rsplit(" · ", 1)[1]
+        assert day == "5 Nov 2026"
+        assert " " not in day
+
     def test_oil_cheaper_than_heating_oil_needs_no_rin(self, tmp_path, monkeypatch) -> None:
         prices = read_snapshot(readme_figures.price_snapshot())
         prices["Heating Oil"] *= 3
