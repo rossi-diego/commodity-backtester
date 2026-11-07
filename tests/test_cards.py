@@ -341,7 +341,7 @@ class TestBacktestLine:
         es_line = es_backtest_line(BACKTEST, ES_BACKTEST_LINE)
         assert f"Kupiec{NB}p{NB}0.83" in var_line
         assert f"independence{NB}p{NB}0.29" in var_line
-        assert es_line.endswith(f"Acerbi–{WJ}Szekely{NB}p{NB}0.84.")
+        assert es_line.endswith(f"Acerbi–{WJ}Szekely{NB}p{NB}0.84, independence{NB}p{NB}0.03.")
         for line in (var_line, es_line):
             assert not re.search(r"\sp\s", line.replace(NB, "_"))
 
@@ -371,15 +371,25 @@ class TestEsBacktestLine:
     def test_the_es_line_sits_under_the_var_line(self) -> None:
         expected = (
             f'Kupiec{NB}p{NB}0.83, independence{NB}p{NB}0.29.</p><p class="cm-risk-test">'
-            '<span class="cm-chip cm-chip-pass">Holds</span> ES backtest, 5 years: 14 of 685 '
+            '<span class="cm-chip cm-chip-fail">Clusters</span> ES backtest, 5 years: 14 of 685 '
             "changes beyond the 97.5% VaR (2.0%, 2.5% expected); mean loss 0.97× ES; "
-            f"Acerbi–{WJ}Szekely{NB}p{NB}0.84.</p>"
+            f"Acerbi–{WJ}Szekely{NB}p{NB}0.84, independence{NB}p{NB}0.03.</p>"
         )
         assert expected in self._strip(BACKTEST)
 
-    @pytest.mark.parametrize(("p", "verdict"), [(0.05, "Holds"), (0.0499, "Under-covers")])
-    def test_the_es_chip_reads_the_simulated_p(self, p, verdict) -> None:
-        test = replace(BACKTEST, z2_p=p)
+    @pytest.mark.parametrize(
+        ("p", "independence", "verdict"),
+        [
+            (0.05, 0.05, "Holds"),
+            (0.0499, 0.05, "Under-covers"),
+            (0.05, 0.0499, "Clusters"),
+            (0.0499, 0.0499, "Under-covers"),
+        ],
+    )
+    def test_the_es_chip_reads_the_simulated_p_then_independence(
+        self, p, independence, verdict
+    ) -> None:
+        test = replace(BACKTEST, z2_p=p, es_christoffersen_p=independence)
         chip = f'<span class="cm-chip {VERDICT_CLASS[verdict]}">{verdict}</span> ES backtest'
         assert chip in self._strip(test)
 
@@ -388,7 +398,7 @@ class TestEsBacktestLine:
         line = es_backtest_line(test, ES_BACKTEST_LINE)
         assert "0 of 685 changes" in line
         assert "(0.0%, 2.5% expected); mean loss n/a;" in line
-        assert line.endswith("p\N{NO-BREAK SPACE}1.00.")
+        assert "Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}1.00," in line
 
 
 def test_method_row() -> None:

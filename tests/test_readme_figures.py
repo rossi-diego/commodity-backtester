@@ -378,8 +378,8 @@ README_QUOTES = [
     "{risk_worst_2_date} and {risk_worst_3_usd:,} USD on {risk_worst_3_date}.",
     "In the 5 years to {risk_date}, {risk_excluded_changes} changes stay in one contract but "
     "touch a delivery session, against {risk_kept_changes} clean ones. They are more volatile, "
-    "σ {risk_excluded_sd_usd_t} against {risk_kept_sd_usd_t} USD/t, but leaving them out does "
-    "not understate the VaR on this sample: on all {risk_combined_changes:,} changes the same "
+    "σ {risk_excluded_sd_usd_t} against {risk_kept_sd_usd_t} USD/t, but leaving them out is "
+    "not shown to understate the VaR on this sample: on all {risk_combined_changes:,} changes the same "
     "method gives {risk_combined_var_usd:,} USD against {risk_var_usd:,}, and the clean VaR, "
     "tested on the {risk_excluded_tested} left-out changes, has {risk_excluded_exceptions} "
     "exceptions ({risk_excluded_rate_pct}%, Kupiec p {risk_excluded_kupiec_p}).",

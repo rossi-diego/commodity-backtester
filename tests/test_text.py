@@ -92,7 +92,8 @@ def test_es_backtest_line_fits_under_the_strip() -> None:
     assert "1,234 of 12,345 changes beyond the 97.5% VaR (10.0%, 2.5% expected)" in line
     assert "mean loss 12.35× ES" in line
     assert line.endswith(
-        "Acerbi–\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}<\N{NO-BREAK SPACE}0.01."
+        "Acerbi–\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}<\N{NO-BREAK SPACE}0.01, "
+        "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}<\N{NO-BREAK SPACE}0.01."
     )
     assert _words(line) <= 30
 

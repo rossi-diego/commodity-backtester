@@ -207,7 +207,12 @@ def backtest_verdict(test: Backtest) -> Verdict:
 
 
 def _es_verdict(test: Backtest) -> Verdict:
-    return "Holds" if test.z2_p >= BACKTEST_SIGNIFICANCE else "Under-covers"
+    """What the ES backtest says, Acerbi-Szekely first, then independence, as for the VaR."""
+    if test.z2_p < BACKTEST_SIGNIFICANCE:
+        return "Under-covers"
+    if test.es_christoffersen_p < BACKTEST_SIGNIFICANCE:
+        return "Clusters"
+    return "Holds"
 
 
 def _chip(verdict: Verdict) -> str:
@@ -238,6 +243,7 @@ def es_backtest_line(test: Backtest, template: str) -> str:
         expected=1 - ES_LEVEL,
         severity="n/a" if math.isnan(test.es_ratio) else f"{test.es_ratio:.2f}× ES",
         z2p=_p_value(test.z2_p),
+        independence=_p_value(test.es_christoffersen_p),
     )
 
 

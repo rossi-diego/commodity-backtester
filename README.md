@@ -107,7 +107,7 @@ ES backtest at 97.5%, on the same days:
 |---:|---:|---:|---:|---:|---:|---:|---:|
 | 685 | 14 | 2.0% | 0.43 | 0.03 | 0.97 | 0.20 | 0.84 |
 
-Mean loss / ES is the average loss on an exception day over that day's ES forecast. The published −0.70 critical value of Z2 is for 250 days, so the p-value is simulated: 2,000 samples, each drawing every day's outcome from that day's own scenarios, with a fixed seed. A second line on the page states this test, after its own chip. The ES chip reads "Holds" when the simulated Acerbi–Szekely p is 0.05 or more, else "Under-covers".
+Mean loss / ES is the average loss on an exception day over that day's ES forecast. The published −0.70 critical value of Z2 is for 250 days, so the p-value is simulated: 2,000 samples, each drawing every day's outcome from that day's own scenarios, with a fixed seed. A second line on the page states this test, after its own chip. The ES chip follows the same order: "Under-covers" when the simulated Acerbi–Szekely p is below 0.05, "Clusters" when only the independence test of the 97.5% exceptions rejects, and "Holds" otherwise. On this sample it reads "Clusters".
 
 At 97.5%, 2 of the 14 exceptions fall on the clean change right after another exception, so independence is rejected at that level (p 0.03); the 95% exceptions do not cluster (p 0.29).
 
@@ -115,7 +115,7 @@ A third line lists the three worst clean days of the 5 years, on 1,000 t: −11,
 
 ### What the risk sample leaves out
 
-In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones. They are more volatile, σ 4.49 against 3.53 USD/t, but leaving them out does not understate the VaR on this sample: on all 1,121 changes the same method gives 5,925 USD against 6,114, and the clean VaR, tested on the 436 left-out changes, has 27 exceptions (6.2%, Kupiec p 0.27). The VaR still does not model taking or making delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
+In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones. They are more volatile, σ 4.49 against 3.53 USD/t, but leaving them out is not shown to understate the VaR on this sample: on all 1,121 changes the same method gives 5,925 USD against 6,114, and the clean VaR, tested on the 436 left-out changes, has 27 exceptions (6.2%, Kupiec p 0.27). The VaR still does not model taking or making delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
 
 ## Rolls and delivery
 
@@ -211,7 +211,6 @@ soybean-crush-margin/
 ├── app.py                      # Streamlit page only
 ├── .streamlit/config.toml      # Dark theme
 ├── docs/screenshot.png         # README screenshot
-├── docs/{before,after}_*.png   # Full page with the D4 RIN on, at 1440, 1024 and 390 px
 ├── data/seed/                  # Dated copy of the EPA D4 RIN series, the fallback
 ├── src/
 │   ├── config.py               # Paths and cache settings

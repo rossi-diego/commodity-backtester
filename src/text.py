@@ -105,7 +105,8 @@ BACKTEST_LINE: Final[str] = (
 ES_BACKTEST_LINE: Final[str] = (
     "ES backtest, {years} years: {exceptions:,} of {days:,} changes beyond the {level:.1%} VaR "
     "({rate:.1%}, {expected:.1%} expected); mean loss {severity}; "
-    "Acerbi\N{EN DASH}\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{z2p}."
+    "Acerbi\N{EN DASH}\N{WORD JOINER}Szekely\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{z2p}, "
+    "independence\N{NO-BREAK SPACE}p\N{NO-BREAK SPACE}{independence}."
 )
 # The worst clean days, filled by ``cards.worst_line``: at most 30 words.
 WORST_LINE: Final[str] = "Worst clean days, {years} years, {tonnes:,} t: {days}."
