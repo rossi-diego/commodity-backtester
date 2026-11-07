@@ -83,7 +83,15 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
         price = float(d4.iloc[-1])
         figures["d4_usd_per_rin"] = _rounded(price, 2)
         figures["d4_usd_per_m3"] = _rounded(cast(float, rin_per_m3(price)))
+        yearly_d4 = d4.groupby(pd.DatetimeIndex(d4.index).year).mean()
+        for year in range(FIRST_YEAR, latest.year + 1):
+            figures[f"d4_mean_{year}"] = _rounded(yearly_d4.get(year, float("nan")), 2)
     figures["btc_usd_per_m3"] = _rounded(BTC_USD_PER_GALLON * GALLONS_PER_M3)
+
+    # Oil's share of product value by year, from the three years before the biodiesel market.
+    oil_share = yearly_means(crush["oil_share"] * 100, crush["flagged"])
+    for year in range(FIRST_YEAR - 3, latest.year + 1):
+        figures[f"oil_share_{year}"] = _rounded(oil_share.get(year, float("nan")))
 
     # Both columns leave out the sessions on a held RIN price, so they cover the same days.
     before = yearly_means(gap["gap"], gap["flagged"], gap["rin_held"])

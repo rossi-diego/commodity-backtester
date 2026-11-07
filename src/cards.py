@@ -26,6 +26,7 @@ from .risk import (
     percent_shares,
 )
 from .seasonal import LOOKBACK_YEARS
+from .wording import day
 
 __all__ = [
     "BACKTEST_SIGNIFICANCE",
@@ -247,11 +248,6 @@ def es_backtest_line(test: Backtest, template: str) -> str:
     )
 
 
-def _day(d: pd.Timestamp) -> str:
-    # d.day, not %-d, which is not portable to Windows.
-    return f"{d.day} {d:%b %Y}"
-
-
 def worst_line(worst: tuple[tuple[pd.Timestamp, float], ...], template: str) -> str:
     """The largest clean losses of the window as plain text, worst first.
 
@@ -259,7 +255,7 @@ def worst_line(worst: tuple[tuple[pd.Timestamp, float], ...], template: str) -> 
     joiner after the minus, which a browser would otherwise break after.
     """
     days = ", ".join(
-        f"{_dollars(loss)} ({_day(date)})".replace("−", "−\N{WORD JOINER}").replace(
+        f"{_dollars(loss)} ({day(date)})".replace("−", "−\N{WORD JOINER}").replace(
             " ", "\N{NO-BREAK SPACE}"
         )
         for date, loss in worst
@@ -288,7 +284,7 @@ def risk_strip_html(summary: RiskSummary | None, copy: RiskCopy) -> str:
         footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
         line = f"n/a: under {MIN_CHANGES} clean daily changes"
         return f'<div class="cm-risk"><p class="cm-risk-na">{html.escape(line)}</p>{footer}</div>'
-    as_of = f"As of {_day(summary.date)}, the last clean change. "
+    as_of = f"As of {day(summary.date)}, the last clean change. "
     footer = f'<p class="cm-risk-note">{html.escape(as_of + note)}</p>'
     if summary.worst:
         text = html.escape(worst_line(summary.worst, copy.worst))

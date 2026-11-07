@@ -10,7 +10,7 @@ Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third to about half of that product value, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
+A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third of that product value in 2018–2020 (31% to 33% a year) to 39–45% from 2021 to 2025 and 51% in 2026 to date, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
 
 ![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR and ES backtest lines and the worst clean days](docs/screenshot.png)
 
@@ -31,6 +31,43 @@ The page repeats one shape three times: three cards of equal size, then one char
 - **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. This year's legend entry reads "2026 (to date)", and the month in progress is a hollow dot, not joined to the line.
 
 The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap after the RIN is drawn in cyan, a colour no other line uses. The third card shows the gap before the RIN and the D4 price that would close it, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
+
+## Quick start
+
+```bash
+git clone https://github.com/rossi-diego/soybean-crush-margin.git
+cd soybean-crush-margin
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+The first run downloads about 26 years of daily closes from Yahoo Finance, which takes a few seconds.
+
+### Developer setup
+
+```bash
+pip install -r requirements-dev.txt
+pytest                                           # tests, and src coverage of at least 95%
+ruff format --check src/ tests/ scripts/ app.py  # formatting
+ruff check src/ tests/ scripts/ app.py           # lint
+mypy src/ app.py scripts/                        # type-check, strict
+pip-audit -r requirements.txt --strict           # known vulnerabilities in every runtime package
+python -m scripts.readme_figures --snapshot      # the README figures, offline
+```
+
+CI runs the tests on Python 3.11 and 3.14, the version Streamlit Community Cloud uses.
+
+The direct dependencies are pinned in `requirements.in` and `requirements-dev.in`. The lock files are generated with [uv](https://docs.astral.sh/uv/) for every platform and Python version, and the dev lock is constrained to the runtime lock, so dev, CI and the live app run the same versions:
+
+```bash
+uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
+uv pip compile requirements-dev.in --universal --python-version 3.11 -c requirements.txt -o requirements-dev.txt
+```
+
+To bump a package, edit its pin in the `.in` file, then run the same command with `--upgrade-package <name>`, first for `requirements.txt` and then for `requirements-dev.txt`.
+
+`python -m scripts.readme_figures --write-snapshot` saves the live prices and the D4 cache to `tests/fixtures`, named by the last price date. Point `SNAPSHOT_DATE` in the script at a new pair, then update the README and the expected figures in `tests/test_readme_figures.py` together.
 
 ## How it is calculated
 
@@ -57,6 +94,8 @@ The last EPA week is 2026-09-21, with the D4 RIN at 2.09 USD: about 829 USD per 
 | 2024 | +236 | −72 |
 | 2025 | +361 | −2 |
 | 2026 (to date) | +368 | −288 |
+
+Most of the 2026 drop after the RIN is the D4 price: it averaged 1.68 USD in 2026 to date against 0.93 USD in 2025, while the gap before the RIN moved from +361 to +368 USD/m³.
 
 On 2026-11-05 the oil cost exceeds heating oil by 85 USD/m³, so a D4 RIN of 0.22 USD would close the feedstock gap, before conversion costs, against 2.09 USD at the last EPA week.
 
@@ -162,47 +201,10 @@ src/risk.py      clean daily changes; filtered 1-day VaR and ES, backtests, ES b
    |
    v
 src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy)
-   + src/styles.py (page CSS) -> app.py (Streamlit page)
+   + src/wording.py (sentences) + src/styles.py (page CSS) -> app.py (Streamlit page)
 ```
 
 Logs use `key=value` fields, for example `event=data_load source=cache rows=6714 as_of=2026-11-05`, `event=cache_rejected problems=...` and `event=data_load_failed reason=...`.
-
-## Quick start
-
-```bash
-git clone https://github.com/rossi-diego/soybean-crush-margin.git
-cd soybean-crush-margin
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-The first run downloads about 26 years of daily closes from Yahoo Finance, which takes a few seconds.
-
-### Developer setup
-
-```bash
-pip install -r requirements-dev.txt
-pytest                                           # tests, and src coverage of at least 95%
-ruff format --check src/ tests/ scripts/ app.py  # formatting
-ruff check src/ tests/ scripts/ app.py           # lint
-mypy src/ app.py scripts/                        # type-check, strict
-pip-audit -r requirements.txt --strict           # known vulnerabilities in every runtime package
-python -m scripts.readme_figures --snapshot      # the README figures, offline
-```
-
-CI runs the tests on Python 3.11 and 3.14, the version Streamlit Community Cloud uses.
-
-The direct dependencies are pinned in `requirements.in` and `requirements-dev.in`. The lock files are generated with [uv](https://docs.astral.sh/uv/) for every platform and Python version, and the dev lock is constrained to the runtime lock, so dev, CI and the live app run the same versions:
-
-```bash
-uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
-uv pip compile requirements-dev.in --universal --python-version 3.11 -c requirements.txt -o requirements-dev.txt
-```
-
-To bump a package, edit its pin in the `.in` file, then run the same command with `--upgrade-package <name>`, first for `requirements.txt` and then for `requirements-dev.txt`.
-
-`python -m scripts.readme_figures --write-snapshot` saves the live prices and the D4 cache to `tests/fixtures`, named by the last price date. Point `SNAPSHOT_DATE` in the script at a new pair, then update the README and the expected figures in `tests/test_readme_figures.py` together.
 
 ## Project structure
 
@@ -223,6 +225,7 @@ soybean-crush-margin/
 │   ├── risk.py                 # Clean daily changes, filtered VaR and ES, backtests, ES by leg
 │   ├── visualization.py        # Plotly figure builders, no UI imports
 │   ├── cards.py                # HTML for the cards, rails and method notes
+│   ├── wording.py              # Sentences and numbers as the page prints them
 │   ├── styles.py               # The page CSS
 │   └── text.py                 # Page copy, held to length limits by tests
 ├── scripts/readme_figures.py   # The D4, yearly, roll and risk figures in this README
