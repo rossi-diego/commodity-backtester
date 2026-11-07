@@ -23,7 +23,7 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 | 1. Is crushing paying well or badly now? | Crush margin, its 5-year rank, the board crush per bushel, and this month against the same month of the five previous years | USD per tonne of soybeans |
 | 2. How much of the value is oil? | Oil share of the product value, its 5-year median and rank, and the oil and meal value | % and USD per tonne |
 | 3. What does the oil in biodiesel cost next to diesel? | The soybean oil for 1 m³ of biodiesel against 1 m³ of heating oil, per m³ and per gallon (the BOHO spread), before and after the D4 RIN. This is the feedstock alone, not the biodiesel price: methanol, energy and plant costs come on top | USD per m³ |
-| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over 20 sessions and 1 year, 1-day VaR 95% and ES 97.5% on a long 1,000 t board crush, and each leg's share of the risk | USD per tonne and USD |
+| Risk: how much can a crush position move in a day? | A row under the crush chart: daily σ over the last 20 clean changes and 1 year, 1-day VaR 95% and ES 97.5% (filtered historical simulation, backtested) on a long 1,000 t board crush, and each leg's share of the risk | USD per tonne and USD |
 
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
@@ -66,25 +66,41 @@ On 2026-11-05 the RIN value exceeds the feedstock gap by about 743 USD/m³, usin
 
 ## Risk on a notional crush
 
-Under the crush chart, one row gives the 1-day risk of a long board crush of 1,000 t of soybeans: long meal and oil, short soybeans. It is a historical simulation on front-month closes, not a hedge book.
+Under the crush chart, one row gives the 1-day risk of a long board crush of 1,000 t of soybeans: long meal and oil, short soybeans. It is a filtered historical simulation on front-month closes, not a hedge book: each past change is rescaled to today's volatility before it becomes a scenario.
 
 | Measure | Formula |
 |---|---|
 | Daily change | Δcrush between two consecutive sessions that are both clean, in USD/t. A change that touches a flagged session is dropped, so a roll jump is never a P&L |
-| Window | The 5 years to the last clean change, the same as the ranks. Under 250 changes, the page shows n/a |
+| Window | The 5 years to the last clean change, the same as the ranks. Under 250 standardised changes, the page shows n/a |
 | P&L | 1,000 t × Δcrush |
-| Daily σ | Standard deviation of Δcrush over the last 20 changes and over the last year, in USD/t, not annualised |
-| VaR 95% | −(5% quantile of the P&L), linear interpolation, 1 day, no square-root-of-time scaling |
-| ES 97.5% | −(mean of the P&L at or below its 2.5% quantile) |
-| Risk by leg | cov(leg, Δcrush) / var(Δcrush) for meal, oil and −soybeans. The three add up to 100%, and a leg that offsets the others is negative |
+| Daily σ | Standard deviation of Δcrush over the last 20 clean changes and over the last year, in USD/t, not annualised |
+| EWMA volatility | σ²ₜ₊₁ = 0.94 σ²ₜ + 0.06 Δ²ₜ over clean changes, seeded with the mean square of the first 30, which never become scenarios |
+| Standardised change | zₜ = Δcrushₜ / σₜ, with σₜ from earlier changes only |
+| VaR 95% | −1,000 t × σ_next × (5% quantile of z over 5 years), linear interpolation, 1 day, no square-root-of-time scaling |
+| ES 97.5% | −1,000 t × σ_next × (mean of z at or below its 2.5% quantile) |
+| Backtest | Each change in the 5 years is forecast only from earlier changes; an exception is a P&L below −VaR. Kupiec POF against 5% and Christoffersen independence, each χ² with 1 df |
+| Risk by leg | cov(leg, Δcrush) / var(Δcrush) for meal, oil and −soybeans, equal-weighted over 5 years. The three add up to 100%, and a leg that offsets the others is negative |
 
-On the clean changes to 2026-10-29 (685 in 5 years; data to 2026-11-05):
+On the clean changes to 2026-10-29 (685 in 5 years; data to 2026-11-05), with σ_next = 3.59 USD/t:
 
-| Daily σ, 20 changes | Daily σ, 1 year | 1-day VaR 95% | 1-day ES 97.5% | Risk by leg |
+| Daily σ, last 20 changes | Daily σ, 1 year | 1-day VaR 95% | 1-day ES 97.5% | Risk by leg |
 |---:|---:|---:|---:|---|
-| 3.91 USD/t | 3.66 USD/t | 5,852 USD | 8,294 USD | oil 51%, meal 31%, soybeans 17% |
+| 3.91 USD/t | 3.66 USD/t | 6,114 USD | 8,720 USD | oil 51%, meal 31%, soybeans 17% |
 
 A change needs two clean ends, so 685 changes in 5 years is about 137 a year. That is why the window is 5 years: one year would leave about 3 scenarios beyond the 97.5% quantile.
+
+Backtest from 2021-11-17 to 2026-10-29, at 95%:
+
+| Method | Changes | Exceptions | Rate | Kupiec p | Christoffersen p |
+|---|---:|---:|---:|---:|---:|
+| Filtered HS (shown) | 685 | 33 | 4.8% | 0.83 | 0.29 |
+| Plain HS, same window | 685 | 65 | 9.5% | <0.001 | <0.001 |
+
+Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version.
+
+### What the risk sample leaves out
+
+In the 5 years to 2026-10-29, 436 changes stay in one contract but touch a delivery session, against 685 clean ones; they are more volatile, σ 4.49 against 3.53 USD/t. The VaR therefore does not cover holding a contract into delivery. Scheduled reports in those weeks drop out too: days 8 to 14 of the month, when the WASDE is released, have clean sessions only in February, April and June. The VaR does not include that event risk.
 
 ## Rolls and delivery
 
@@ -127,7 +143,7 @@ src/margins.py   metric units, crush, oil share, feedstock gap; a missing leg dr
 src/rolls.py     contract calendars: delivery and switch flags
 src/rins.py      D4 RIN loader: cache, EPA, then the saved copy in data/seed
 src/seasonal.py  latest clean reading, 5-year percentile, monthly averages by year
-src/risk.py      daily changes between consecutive clean sessions; 1-day VaR, ES and risk by leg
+src/risk.py      clean daily changes; filtered 1-day VaR and ES, backtest, risk by leg
    |
    v
 src/visualization.py (Plotly figures) + src/cards.py (card HTML) + src/text.py (copy)
@@ -175,7 +191,7 @@ soybean-crush-margin/
 │   ├── rins.py                 # Weekly D4 RIN prices from EPA, with a saved fallback
 │   ├── margins.py              # Crush margin, oil share, feedstock gap
 │   ├── seasonal.py             # Percentile rank and monthly averages on clean sessions
-│   ├── risk.py                 # Clean daily changes, 1-day VaR, ES and risk by leg
+│   ├── risk.py                 # Clean daily changes, filtered VaR and ES, backtest, risk by leg
 │   ├── visualization.py        # Plotly figure builders, no UI imports
 │   ├── cards.py                # HTML for the cards, rails and method notes
 │   ├── styles.py               # The page CSS

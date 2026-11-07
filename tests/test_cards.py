@@ -116,19 +116,27 @@ class TestRiskStrip:
         markup = risk_strip_html(self._summary(), "note")
         assert markup.count('class="cm-risk-cell"') == 4
         assert "<dd>$4.57/t / $5.00/t</dd>" in markup
-        assert "Daily σ, 20 sessions / 1 year" in markup
+        assert "Daily σ, last 20 changes / 1 year" in markup
+        assert "sessions" not in markup
         assert "1-day VaR 95%, 1,000 t</dt><dd>$8,123</dd>" in markup
         assert "ES 97.5%</dt><dd>$11,235</dd>" in markup
         assert "oil +62% · meal +71% · beans −33%" in markup
         assert "n/a" not in markup
 
+    def test_note_starts_with_the_as_of_date(self) -> None:
+        markup = risk_strip_html(self._summary(date=pd.Timestamp("2026-10-09")), "Note.")
+        expected = '<p class="cm-risk-note">As of 9 Oct 2026, the last clean change. Note.</p>'
+        assert expected in markup
+
     def test_text_is_escaped(self) -> None:
         markup = risk_strip_html(self._summary(), "a < b & c")
-        assert "a &lt; b &amp; c" in markup
+        assert "the last clean change. a &lt; b &amp; c</p>" in markup
         assert "a < b" not in markup
 
     def test_no_summary_is_one_line(self) -> None:
         markup = risk_strip_html(None, "note")
+        assert '<p class="cm-risk-note">note</p>' in markup
+        assert "As of" not in markup
         assert "cm-risk-cell" not in markup
         assert "n/a: under 250 clean daily changes" in markup
 

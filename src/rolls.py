@@ -29,6 +29,7 @@ __all__ = [
     "DIESEL_MONTHS",
     "PRODUCT_MONTHS",
     "crush_flags",
+    "crush_switches",
     "front_contracts",
     "gap_flags",
     "grain_first_notice",
@@ -104,12 +105,21 @@ def _switched(front: pd.DataFrame) -> pd.Series:
     return key.ne(key.shift()) & key.shift().notna()
 
 
+def _crush_states(dates: pd.DatetimeIndex) -> tuple[pd.DataFrame, pd.DataFrame]:
+    return _grain_state(dates, BEAN_MONTHS), _grain_state(dates, PRODUCT_MONTHS)
+
+
 def crush_flags(dates: pd.DatetimeIndex) -> pd.Series:
     """True where any crush leg is in its delivery period or has just switched contract."""
-    beans = _grain_state(dates, BEAN_MONTHS)
-    products = _grain_state(dates, PRODUCT_MONTHS)
+    beans, products = _crush_states(dates)
     flagged = beans["delivery"] | beans["switch"] | products["delivery"] | products["switch"]
     return flagged.rename("flagged")
+
+
+def crush_switches(dates: pd.DatetimeIndex) -> pd.Series:
+    """True on the first session of a new bean or product contract, a subset of the flags."""
+    beans, products = _crush_states(dates)
+    return (beans["switch"] | products["switch"]).rename("switch")
 
 
 def off_pair(dates: pd.DatetimeIndex) -> pd.Series:

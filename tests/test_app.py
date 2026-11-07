@@ -453,9 +453,10 @@ class TestSource:
         assert SOURCE.count("st.plotly_chart(") == 1
         assert SOURCE.count("theme=None") == 1
 
-    def test_no_backtest_left(self) -> None:
+    def test_no_strategy_backtest_left(self) -> None:
+        """The only backtest left is the VaR's, in src/risk.py and the README."""
         for text in (SOURCE, README):
-            for word in ("Donchian", "momentum", "Buy & hold", "Backtest"):
+            for word in ("Donchian", "momentum", "Buy & hold", "Backtester", "strategy backtest"):
                 assert word not in text
 
     def test_page_clears_the_streamlit_cloud_bar(self) -> None:

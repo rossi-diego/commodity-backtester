@@ -17,9 +17,17 @@ from src.constants import BUSHELS_PER_TONNE, GALLONS_PER_M3
 from src.data_loader import load_prices
 from src.margins import add_rins, crush_table, gap_table, rin_per_m3
 from src.rins import load_d4
-from src.risk import clean_changes, risk_summary
+from src.risk import (
+    Backtest,
+    _forecasts,
+    christoffersen_independence,
+    clean_changes,
+    kupiec_pof,
+    risk_summary,
+    sample_bias,
+)
 from src.rolls import off_pair
-from src.seasonal import yearly_means
+from src.seasonal import LOOKBACK_YEARS, yearly_means
 
 __all__ = ["FIRST_YEAR", "compute", "main"]
 
@@ -92,11 +100,49 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
         figures["risk_changes"] = risk.changes
         figures["risk_vol_20_usd_t"] = _rounded(risk.vol_20, 2)
         figures["risk_vol_1y_usd_t"] = _rounded(risk.vol_1y, 2)
+        figures["risk_vol_ewma_usd_t"] = _rounded(risk.vol_ewma, 2)
         figures["risk_var_usd"] = _rounded(risk.var)
         figures["risk_es_usd"] = _rounded(risk.es)
         for leg, share in risk.contributions.items():
             figures[f"risk_share_{leg}"] = _rounded(share * 100)
+        clean = clean_changes(crush)
+        figures |= _backtest_figures(clean["crush"], risk.backtest)
+        # Days 8 to 14, when the WASDE is released: the months with a clean change then.
+        days = pd.DatetimeIndex(clean.loc[risk.date - pd.DateOffset(years=LOOKBACK_YEARS) :].index)
+        mid_month = (days.day >= 8) & (days.day <= 14)
+        figures["risk_clean_days_8_14_months"] = sorted({int(m) for m in days.month[mid_month]})
+
+    bias = sample_bias(crush)
+    if bias is not None:
+        figures["risk_kept_changes"] = bias.kept
+        figures["risk_excluded_changes"] = bias.excluded
+        figures["risk_kept_sd_usd_t"] = _rounded(bias.kept_sd, 2)
+        figures["risk_excluded_sd_usd_t"] = _rounded(bias.excluded_sd, 2)
     return figures
+
+
+def _p_value(p: float) -> float | str | None:
+    return "<0.001" if p < 0.001 else _rounded(p, 2)
+
+
+def _backtest_figures(changes: pd.Series, backtest: Backtest | None) -> dict[str, Any]:
+    """The filtered VaR backtest, and plain historical simulation on the same days."""
+    if backtest is None:
+        return {}
+    forecasts = _forecasts(changes)
+    hs_hits = (forecasts["change"] < -forecasts["hs"]).to_numpy()
+    return {
+        "risk_backtest_start": backtest.start.date().isoformat(),
+        "risk_backtest_days": backtest.days,
+        "risk_backtest_exceptions": backtest.exceptions,
+        "risk_backtest_rate_pct": _rounded(backtest.rate * 100, 1),
+        "risk_backtest_hs_exceptions": backtest.hs_exceptions,
+        "risk_backtest_hs_rate_pct": _rounded(backtest.hs_exceptions / backtest.days * 100, 1),
+        "risk_kupiec_p": _p_value(backtest.kupiec_p),
+        "risk_christoffersen_p": _p_value(backtest.christoffersen_p),
+        "risk_hs_kupiec_p": _p_value(kupiec_pof(backtest.hs_exceptions, backtest.days)),
+        "risk_hs_christoffersen_p": _p_value(christoffersen_independence(hs_hits)),
+    }
 
 
 def main() -> None:

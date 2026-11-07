@@ -95,6 +95,11 @@ def _tables(prices: pd.DataFrame, d4: pd.Series | None) -> tuple[pd.DataFrame, p
     return crush_table(prices), add_rins(gap_table(prices), d4)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _risk(crush: pd.DataFrame) -> RiskSummary | None:
+    return risk_summary(crush)
+
+
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
@@ -607,7 +612,7 @@ def main() -> None:
 
     rins = _load_rins()
     crush, gap = _tables(loaded.prices, rins.prices)
-    risk = risk_summary(crush)
+    risk = _risk(crush)
     readings = {
         "crush": latest_reading(crush["crush"], crush["flagged"]),
         "share": latest_reading(crush["oil_share"], crush["flagged"]),

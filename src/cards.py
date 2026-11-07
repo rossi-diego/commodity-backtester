@@ -14,7 +14,7 @@ from .risk import (
     ES_LEVEL,
     MIN_CHANGES,
     NOTIONAL_TONNES,
-    SHORT_VOL_SESSIONS,
+    SHORT_VOL_CHANGES,
     VAR_LEVEL,
     RiskSummary,
 )
@@ -151,16 +151,20 @@ def _dollars(value: float) -> str:
 
 def risk_strip_html(summary: RiskSummary | None, note: str) -> str:
     """The 1-day risk of the crush in one row of four cells, under its chart."""
-    footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
     if summary is None:
+        footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
         line = f"n/a: under {MIN_CHANGES} clean daily changes"
         return f'<div class="cm-risk"><p class="cm-risk-na">{html.escape(line)}</p>{footer}</div>'
+    d = summary.date
+    # d.day, not %-d, which is not portable to Windows.
+    as_of = f"As of {d.day} {d:%b %Y}, the last clean change. "
+    footer = f'<p class="cm-risk-note">{html.escape(as_of + note)}</p>'
     legs = " · ".join(
         f"{leg} {_signed_percent(share)}" for leg, share in summary.contributions.items()
     )
     cells = [
         (
-            f"Daily σ, {SHORT_VOL_SESSIONS} sessions / 1 year",
+            f"Daily σ, last {SHORT_VOL_CHANGES} changes / 1 year",
             f"${summary.vol_20:,.2f}/t / ${summary.vol_1y:,.2f}/t",
         ),
         (f"1-day VaR {VAR_LEVEL:.0%}, {NOTIONAL_TONNES:,} t", _dollars(summary.var)),

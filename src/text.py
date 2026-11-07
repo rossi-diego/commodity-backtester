@@ -61,8 +61,8 @@ READING_RIN: Final[str] = (
 
 # Under the crush chart's risk strip, at most 30 words.
 RISK_NOTE: Final[str] = (
-    "1-day historical simulation on clean daily changes of the past 5 years, long 1,000 t "
-    "board crush. Front-month closes, not a hedge book."
+    "Filtered historical simulation: 5 years of clean changes scaled to today's EWMA "
+    "volatility. Delivery and roll days, which move more, are left out. Long 1,000 t board crush."
 )
 
 METHOD: Final[list[MethodCard]] = [
@@ -150,7 +150,12 @@ FULL_METHOD: Final[str] = (
     "flags leave mostly the second half of the month. Ranks count clean sessions, so months "
     "without a delivery period weigh more. Part of the seasonal shape is the switch to "
     "new-crop contracts.\n\n"
-    "**Risk.** Historical simulation on a long 1,000 t board crush: 1-day changes between "
-    "consecutive clean sessions over 5 years, so a roll jump is never a P&L. Risk by leg is "
-    "each leg's covariance with the crush over its variance."
+    "**Risk.** Filtered historical simulation on a long 1,000 t board crush, front-month "
+    "closes, not a hedge book. Each 1-day change between consecutive clean sessions in the past "
+    "5 years is divided by its EWMA volatility (λ = 0.94), and VaR and ES are the tails of those "
+    "standardised changes times today's EWMA volatility. Unfiltered, a 5-year window weighs calm "
+    "and volatile years the same, so its exceptions cluster. The backtest forecasts each change "
+    "only from the changes before it. Delivery-period and roll changes are left out; see the "
+    "README for what that costs. Risk by leg is each leg's covariance with the crush over 5 "
+    "years, over its variance."
 )

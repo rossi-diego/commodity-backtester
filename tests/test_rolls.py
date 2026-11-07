@@ -9,6 +9,7 @@ from src.rolls import (
     BOARD_PAIRS,
     DIESEL_MONTHS,
     crush_flags,
+    crush_switches,
     front_contracts,
     gap_flags,
     grain_first_notice,
@@ -70,6 +71,19 @@ class TestFlags:
     def test_crush_flags_cover_about_four_in_ten_sessions(self) -> None:
         share = crush_flags(pd.bdate_range("2010-01-01", "2019-12-31")).mean()
         assert 0.35 < share < 0.5
+
+    def test_crush_switches_are_flagged_first_sessions(self) -> None:
+        dates = pd.bdate_range("2024-01-01", "2026-12-31")
+        switches = crush_switches(dates)
+        assert switches.name == "switch"
+        assert switches.any()
+        assert not (switches & ~crush_flags(dates)).any()
+        # The first session on January beans, from the November contract.
+        assert switches.loc["2025-11-17"]
+        assert crush_flags(dates).loc["2025-11-17"]
+        # Inside November delivery: flagged, but not a switch.
+        assert not switches.loc["2025-11-05"]
+        assert crush_flags(dates).loc["2025-11-05"]
 
     def test_gap_flags_include_heating_oil_switches(self) -> None:
         flags = gap_flags(pd.bdate_range("2026-09-21", "2026-10-09"))
