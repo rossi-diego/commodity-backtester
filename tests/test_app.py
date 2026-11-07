@@ -526,7 +526,7 @@ class TestSource:
     def test_risk_grid_is_two_by_two_on_a_phone(self) -> None:
         phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
         assert ".cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}" in phone
-        assert ".cm-risk-cell:last-child{grid-column:1/-1}" in phone
+        assert ".cm-risk-cell:first-child,.cm-risk-cell:last-child{grid-column:1/-1}" in phone
         assert ".cm-leg{white-space:nowrap}" in CSS
         assert ".cm-nowrap{white-space:nowrap}" in CSS
 

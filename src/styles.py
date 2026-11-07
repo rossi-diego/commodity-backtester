@@ -123,7 +123,7 @@ APP_CSS: Final[str] = """<style>
  .cm-steps{display:none}
  [class*='st-key-card-sec']{padding:.7rem .8rem}
  .cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}
- .cm-risk-cell:last-child{grid-column:1/-1}
+ .cm-risk-cell:first-child,.cm-risk-cell:last-child{grid-column:1/-1}
  [data-testid='stPlotlyChart'] .nsewdrag{pointer-events:none}
  [data-testid='stPlotlyChart'] .modebar-container{display:none}
 }
