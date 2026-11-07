@@ -19,7 +19,7 @@ from src.cards import risk_strip_html
 from src.margins import RIN_TOLERANCE, crush_table
 from src.risk import risk_summary
 from src.seasonal import latest_reading
-from src.text import BACKTEST_LINE, RISK_NOTE
+from src.text import RISK_STRIP
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -248,10 +248,12 @@ class TestFirstLoad:
         summary = risk_summary(crush_table(synthetic_prices))
         assert summary is not None
         strip = _block(app, 'class="cm-risk"')
-        assert strip == risk_strip_html(summary, RISK_NOTE, BACKTEST_LINE)
+        assert strip == risk_strip_html(summary, RISK_STRIP)
         assert strip.count('class="cm-risk-cell"') == 4
         assert summary.backtest is not None
-        assert strip.count('class="cm-risk-test"') == 1
+        assert summary.worst
+        # The VaR test, the ES test and the worst clean days.
+        assert strip.count('class="cm-risk-test"') == 3
         assert strip.index('class="cm-risk-test"') > strip.index("</dl>")
         assert strip.index('class="cm-risk-test"') < strip.index('class="cm-risk-note"')
         assert f"${summary.var:,.0f}" in strip

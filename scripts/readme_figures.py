@@ -28,12 +28,12 @@ from src.margins import add_rins, crush_table, gap_table, rin_per_m3
 from src.rins import _read, load_d4
 from src.risk import (
     Backtest,
-    _forecasts,
     christoffersen_independence,
     clean_changes,
     kupiec_pof,
     risk_summary,
     sample_bias,
+    var_forecasts,
 )
 from src.rolls import off_pair
 from src.seasonal import LOOKBACK_YEARS, yearly_means
@@ -128,6 +128,10 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
         figures["risk_es_usd"] = _rounded(risk.es)
         for leg, share in risk.contributions.items():
             figures[f"risk_share_{leg}"] = _rounded(share * 100)
+        figures["risk_es_tail_scenarios"] = risk.tail_scenarios
+        for rank, (day, loss) in enumerate(risk.worst, start=1):
+            figures[f"risk_worst_{rank}_date"] = day.date().isoformat()
+            figures[f"risk_worst_{rank}_usd"] = _rounded(loss)
         clean = clean_changes(crush)
         figures |= _backtest_figures(clean["crush"], risk.backtest)
         # Days 8 to 14, when the WASDE is released: the months with a clean change then.
@@ -141,6 +145,14 @@ def compute(prices: pd.DataFrame, d4: pd.Series | None) -> dict[str, Any]:
         figures["risk_excluded_changes"] = bias.excluded
         figures["risk_kept_sd_usd_t"] = _rounded(bias.kept_sd, 2)
         figures["risk_excluded_sd_usd_t"] = _rounded(bias.excluded_sd, 2)
+        figures["risk_combined_changes"] = bias.combined_changes
+        figures["risk_combined_var_usd"] = _rounded(bias.combined_var)
+        figures["risk_excluded_tested"] = bias.excluded_tested
+        figures["risk_excluded_exceptions"] = bias.excluded_exceptions
+        if bias.excluded_tested:
+            rate = bias.excluded_exceptions / bias.excluded_tested
+            figures["risk_excluded_rate_pct"] = _rounded(rate * 100, 1)
+            figures["risk_excluded_kupiec_p"] = _p_value(bias.excluded_kupiec_p)
     return figures
 
 
@@ -149,11 +161,12 @@ def _p_value(p: float) -> float | str | None:
 
 
 def _backtest_figures(changes: pd.Series, backtest: Backtest | None) -> dict[str, Any]:
-    """The filtered VaR backtest, and plain historical simulation on the same days."""
+    """The filtered VaR and ES backtests, and plain historical simulation on the same days."""
     if backtest is None:
         return {}
-    forecasts = _forecasts(changes)
+    forecasts = var_forecasts(changes)
     hs_hits = (forecasts["change"] < -forecasts["hs"]).to_numpy()
+    es_hits = (forecasts["change"] < -forecasts["var975"]).to_numpy()
     return {
         "risk_backtest_start": backtest.start.date().isoformat(),
         "risk_backtest_days": backtest.days,
@@ -165,6 +178,15 @@ def _backtest_figures(changes: pd.Series, backtest: Backtest | None) -> dict[str
         "risk_christoffersen_p": _p_value(backtest.christoffersen_p),
         "risk_hs_kupiec_p": _p_value(kupiec_pof(backtest.hs_exceptions, backtest.days)),
         "risk_hs_christoffersen_p": _p_value(christoffersen_independence(hs_hits)),
+        "risk_es_backtest_exceptions": backtest.es_exceptions,
+        "risk_es_backtest_rate_pct": _rounded(backtest.es_rate * 100, 1),
+        "risk_es_kupiec_p": _p_value(backtest.es_kupiec_p),
+        "risk_es_christoffersen_p": _p_value(backtest.es_christoffersen_p),
+        # Exceptions on the clean change right after another exception.
+        "risk_es_back_to_back": int((es_hits[:-1] & es_hits[1:]).sum()),
+        "risk_es_ratio": _rounded(backtest.es_ratio, 2),
+        "risk_z2": _rounded(backtest.z2, 2),
+        "risk_z2_p": _p_value(backtest.z2_p),
     }
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from .cards import MethodCard
+from .cards import MethodCard, RiskCopy
 from .rins import EPA_PAGE
 
 REPOSITORY_URL: Final[str] = "https://github.com/rossi-diego/soybean-crush-margin"
@@ -59,18 +59,40 @@ READING_RIN: Final[str] = (
     "oil cost. Dashed: EPA price held. Dotted: before the RIN."
 )
 
-# Under the crush chart's risk strip, at most 30 words.
+# Under the crush chart's risk strip, at most 30 words with any RISK_EFFECT. The effect
+# is what the left-out changes do to the VaR, picked from the data by ``cards.risk_effect``.
 RISK_NOTE: Final[str] = (
     "Filtered historical simulation: 5 years of clean changes scaled to today's EWMA "
-    "volatility. Roll and delivery days are left out; they would lower the VaR. Long 1,000 t "
-    "board crush."
+    "volatility. Roll and delivery days are left out; {effect}. Crusher's margin, unhedged, "
+    "1,000 t."
 )
+RISK_EFFECT: Final[dict[str, str]] = {
+    "lower": "they would lower the VaR",
+    "raise": "they would raise the VaR",
+    "none": "too few to test",
+}
 
-# The backtest line in the same strip, at most 30 words once filled by
-# ``cards.backtest_line`` from a Backtest and the risk constants; p-values arrive as text.
+# The backtest lines in the same strip, at most 30 words each once filled by
+# ``cards.backtest_line`` and ``cards.es_backtest_line`` from a Backtest and the risk
+# constants; p-values arrive as text.
 BACKTEST_LINE: Final[str] = (
     "Backtest, {years} years: {exceptions} of {days:,} changes beyond the VaR ({rate:.1%}, "
     "{expected:.0%} expected); Kupiec p {kupiec}, independence p {independence}."
+)
+ES_BACKTEST_LINE: Final[str] = (
+    "ES backtest, {years} years: {exceptions:,} of {days:,} changes beyond the {level:.1%} VaR "
+    "({rate:.1%}, {expected:.1%} expected); mean loss {severity}; "
+    "Acerbi\N{EN DASH}Szekely p\N{NO-BREAK SPACE}{z2p}."
+)
+# The worst clean days, filled by ``cards.worst_line``: at most 30 words.
+WORST_LINE: Final[str] = "Worst clean days, {years} years, {tonnes:,} t: {days}."
+
+RISK_STRIP: Final[RiskCopy] = RiskCopy(
+    note=RISK_NOTE,
+    var_test=BACKTEST_LINE,
+    es_test=ES_BACKTEST_LINE,
+    worst=WORST_LINE,
+    effects=RISK_EFFECT,
 )
 
 METHOD: Final[list[MethodCard]] = [
@@ -164,6 +186,6 @@ FULL_METHOD: Final[str] = (
     "standardised changes times today's EWMA volatility. Unfiltered, a 5-year window weighs calm "
     "and volatile years the same, so its exceptions cluster. The backtest forecasts each change "
     "only from the changes before it. Delivery-period and roll changes are left out; see the "
-    "README for what that costs. Risk by leg is each leg's covariance with the crush over 5 "
-    "years, over its variance."
+    "README for what that costs. Each leg's share of the ES is its mean in the ES scenarios "
+    "over the crush's."
 )

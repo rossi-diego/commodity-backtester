@@ -81,6 +81,7 @@ APP_CSS: Final[str] = """<style>
 .cm-chip{display:inline-block;font-size:.6875rem;font-weight:600;letter-spacing:.03em;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--line);margin-right:.4rem;vertical-align:1px}
 .cm-chip-fail{border-color:var(--crush);color:var(--crush)}
 .cm-chip-pass{color:var(--mut)}
+.cm-chip-over{border-style:dashed;color:var(--mut)}
 .cm-risk-note{margin:.6rem 0 0;font-size:.78rem;line-height:1.35;color:var(--mut)}
 .cm-method{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .cm-method section{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--line);border-radius:10px;padding:.9rem 1rem}

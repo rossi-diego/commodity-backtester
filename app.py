@@ -37,7 +37,6 @@ from src.seasonal import (
 )
 from src.styles import APP_CSS
 from src.text import (
-    BACKTEST_LINE,
     FULL_METHOD,
     LINKEDIN_URL,
     METHOD,
@@ -45,7 +44,7 @@ from src.text import (
     READING_HISTORY,
     READING_RIN,
     REPOSITORY_URL,
-    RISK_NOTE,
+    RISK_STRIP,
     SCOPE,
     WHAT,
 )
@@ -419,7 +418,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
         "Crush margin",
         body,
         _past_years(table.index, reading.latest_date.year),
-        footer=risk_strip_html(risk, RISK_NOTE, BACKTEST_LINE),
+        footer=risk_strip_html(risk, RISK_STRIP),
     )
 
 

@@ -60,6 +60,8 @@ def _expected_keys(last_year: int) -> set[str]:
         "risk_share_oil",
         "risk_share_meal",
         "risk_share_beans",
+        "risk_es_tail_scenarios",
+        *(f"risk_worst_{rank}_{part}" for rank in (1, 2, 3) for part in ("date", "usd")),
         "risk_backtest_start",
         "risk_backtest_days",
         "risk_backtest_exceptions",
@@ -70,11 +72,25 @@ def _expected_keys(last_year: int) -> set[str]:
         "risk_christoffersen_p",
         "risk_hs_kupiec_p",
         "risk_hs_christoffersen_p",
+        "risk_es_backtest_exceptions",
+        "risk_es_backtest_rate_pct",
+        "risk_es_kupiec_p",
+        "risk_es_christoffersen_p",
+        "risk_es_back_to_back",
+        "risk_es_ratio",
+        "risk_z2",
+        "risk_z2_p",
         "risk_clean_days_8_14_months",
         "risk_kept_changes",
         "risk_excluded_changes",
         "risk_kept_sd_usd_t",
         "risk_excluded_sd_usd_t",
+        "risk_combined_changes",
+        "risk_combined_var_usd",
+        "risk_excluded_tested",
+        "risk_excluded_exceptions",
+        "risk_excluded_rate_pct",
+        "risk_excluded_kupiec_p",
     }
 
 
@@ -243,9 +259,16 @@ EXPECTED: dict[str, Any] = {
     "risk_vol_ewma_usd_t": 3.59,
     "risk_var_usd": 6114,
     "risk_es_usd": 8720,
-    "risk_share_oil": 51,
-    "risk_share_meal": 31,
-    "risk_share_beans": 17,
+    "risk_share_oil": 69,
+    "risk_share_meal": 28,
+    "risk_share_beans": 2,
+    "risk_es_tail_scenarios": 18,
+    "risk_worst_1_date": "2023-07-26",
+    "risk_worst_1_usd": -11743,
+    "risk_worst_2_date": "2023-03-23",
+    "risk_worst_2_usd": -10079,
+    "risk_worst_3_date": "2026-06-05",
+    "risk_worst_3_usd": -10035,
     "risk_backtest_start": "2021-11-17",
     "risk_backtest_days": 685,
     "risk_backtest_exceptions": 33,
@@ -256,11 +279,25 @@ EXPECTED: dict[str, Any] = {
     "risk_christoffersen_p": 0.29,
     "risk_hs_kupiec_p": "<0.001",
     "risk_hs_christoffersen_p": "<0.001",
+    "risk_es_backtest_exceptions": 14,
+    "risk_es_backtest_rate_pct": 2.0,
+    "risk_es_kupiec_p": 0.43,
+    "risk_es_christoffersen_p": 0.03,
+    "risk_es_back_to_back": 2,
+    "risk_es_ratio": 0.97,
+    "risk_z2": 0.2,
+    "risk_z2_p": 0.84,
     "risk_clean_days_8_14_months": [2, 4, 6],
     "risk_kept_changes": 685,
     "risk_excluded_changes": 436,
     "risk_kept_sd_usd_t": 3.53,
     "risk_excluded_sd_usd_t": 4.49,
+    "risk_combined_changes": 1121,
+    "risk_combined_var_usd": 5451,
+    "risk_excluded_tested": 436,
+    "risk_excluded_exceptions": 27,
+    "risk_excluded_rate_pct": 6.2,
+    "risk_excluded_kupiec_p": 0.27,
 }
 
 # Rows of data/prices.parquet on 2026-11-05, when the snapshot was written.
@@ -292,9 +329,23 @@ README_QUOTES = [
     "| Plain HS, same window | {risk_backtest_days} | {risk_backtest_hs_exceptions} "
     "| {risk_backtest_hs_rate_pct}% | {risk_hs_kupiec_p} | {risk_hs_christoffersen_p} |",
     "(Christoffersen p {risk_hs_christoffersen_p})",
+    "With {risk_es_tail_scenarios} tail scenarios the split moves as the window rolls",
+    "| {risk_backtest_days} | {risk_es_backtest_exceptions} | {risk_es_backtest_rate_pct}% "
+    "| {risk_es_kupiec_p} | {risk_es_christoffersen_p} | {risk_es_ratio:.2f} | {risk_z2:.2f} "
+    "| {risk_z2_p:.2f} |",
+    "At 97.5%, {risk_es_back_to_back} of the {risk_es_backtest_exceptions} exceptions fall on "
+    "the clean change right after another exception, so independence is rejected at that level "
+    "(p {risk_es_christoffersen_p}); the 95% exceptions do not cluster (p {risk_christoffersen_p}).",
+    "A third line lists the three worst clean days of the 5 years, on 1,000 t: "
+    "{risk_worst_1_usd:,} USD on {risk_worst_1_date}, {risk_worst_2_usd:,} USD on "
+    "{risk_worst_2_date} and {risk_worst_3_usd:,} USD on {risk_worst_3_date}.",
     "In the 5 years to {risk_date}, {risk_excluded_changes} changes stay in one contract but "
-    "touch a delivery session, against {risk_kept_changes} clean ones; they are more volatile, "
-    "σ {risk_excluded_sd_usd_t} against {risk_kept_sd_usd_t} USD/t",
+    "touch a delivery session, against {risk_kept_changes} clean ones. They are more volatile, "
+    "σ {risk_excluded_sd_usd_t} against {risk_kept_sd_usd_t} USD/t, but leaving them out does "
+    "not understate the VaR on this sample: on all {risk_combined_changes:,} changes the same "
+    "method gives {risk_combined_var_usd:,} USD against {risk_var_usd:,}, and the clean VaR, "
+    "tested on the {risk_excluded_tested} left-out changes, has {risk_excluded_exceptions} "
+    "exceptions ({risk_excluded_rate_pct}%, Kupiec p {risk_excluded_kupiec_p}).",
 ]
 
 
@@ -334,6 +385,13 @@ def test_readme_quotes_the_figures() -> None:
     readme = (config.PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     missing = [quote for quote in _quotes(EXPECTED) if quote not in readme]
     assert not missing
+
+
+def test_readme_claims_hold_on_the_snapshot() -> None:
+    """Sentences the README states in words, not figures."""
+    assert EXPECTED["risk_combined_var_usd"] < EXPECTED["risk_var_usd"]
+    assert EXPECTED["risk_es_christoffersen_p"] < 0.05 <= EXPECTED["risk_christoffersen_p"]
+    assert EXPECTED["risk_z2_p"] >= 0.05
 
 
 def test_a_changed_figure_is_caught() -> None:
