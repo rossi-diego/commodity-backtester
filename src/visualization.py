@@ -31,6 +31,8 @@ CRUSH: Final[str] = "#c58512"
 OIL: Final[str] = "#4d8fe8"
 MEAL: Final[str] = "#c76fae"
 FLAT: Final[str] = "#7d8796"
+# Cyan is the gap after the D4 RIN only, so it never reads as the oil share's blue.
+RIN: Final[str] = "#62d0e6"
 # FLAT at 0.35 opacity for roll and delivery sessions, deliberately quiet: context, not a mark.
 ROLL: Final[str] = "rgba(125,135,150,0.35)"
 BAND_FILL: Final[str] = "rgba(125, 135, 150, 0.22)"
@@ -41,6 +43,10 @@ LABEL_FILL: Final[str] = "rgba(20,27,35,0.85)"
 # keeps its colour whichever others are picked; six to ten years back repeat the five
 # colours, dashed.
 YEAR_COLORS: Final[tuple[str, ...]] = ("#2bb39b", "#a98bf0", "#86b83a", "#e5664c", "#d86fb0")
+# By-month legend text widths in pixels: every entry gets 36, enough for 7 characters at
+# 10.5 px, so three fit a phone row; "2026 (to date)", the only longer one, gets its own.
+LEGEND_ENTRY_PX: Final[int] = 36
+CURRENT_LEGEND_PX: Final[int] = 80
 # Zero labels: the bin counts tried in turn, and the label box in pixels. The plot size
 # is not known when the figure is built, so the box is sized against a conservative
 # plot: narrower than any desktop chart, so the label is never wider than budgeted there.
@@ -135,7 +141,7 @@ def by_month_figure(
 
     ``current`` is drawn bold in the metric colour; ``years`` are earlier years, each
     in its own colour. ``month_to_date`` is the month in progress, drawn as a hollow marker
-    and not joined to the line. ``band`` shades the range of the five years before
+    and not joined to the line; with it, the current year is named "(to date)". ``band`` shades the range of the five years before
     ``current``, with their average dotted. The legend sits under
     the plot, where it has the full width for the picked years.
     """
@@ -168,9 +174,14 @@ def by_month_figure(
         )
     if current in means:
         line = means[current]
+        name = str(current)
         if month_to_date is not None:
             line = line.where(line.index != month_to_date)
-        fig.add_trace(_month_line(line, str(current), color, 2.5, fmt, counts=counts[current]))
+            name = f"{current} (to date)"
+        trace = _month_line(line, name, color, 2.5, fmt, counts=counts[current])
+        # The one long name gets its own entry width; the year's label names the hollow dot.
+        trace.update(legendgroup="current", legendwidth=CURRENT_LEGEND_PX)
+        fig.add_trace(trace)
         to_date = None if month_to_date is None else means[current].iloc[month_to_date - 1]
         if month_to_date is not None and pd.notna(to_date):
             fig.add_trace(
@@ -179,6 +190,8 @@ def by_month_figure(
                     y=[float(to_date)],
                     mode="markers",
                     name="To date",
+                    legendgroup="current",
+                    showlegend=False,
                     customdata=[int(counts[current].iloc[month_to_date - 1])],
                     hovertemplate=fmt + " (%{customdata} sessions so far)"
                     f"<extra>{MONTHS[month_to_date - 1]} to date</extra>",
@@ -195,11 +208,10 @@ def by_month_figure(
             "yanchor": "top",
             "x": 0,
             "xanchor": "left",
-            # A wrapped legend gives every entry the widest one's width. Names of at most
-            # 7 characters in a fixed 36 px of text (the symbol comes on top) fit three
-            # to a row on a phone.
+            # A wrapped legend gives every entry the widest one's width, so the width is
+            # fixed (the symbol comes on top) and the current year sets its own.
             "font": {"size": 10.5},
-            "entrywidth": 36,
+            "entrywidth": LEGEND_ENTRY_PX,
             "entrywidthmode": "pixels",
         },
         margin={"b": 56},

@@ -12,7 +12,7 @@ Built by **Diego Rossi** · [LinkedIn](https://www.linkedin.com/in/rossi-diego/)
 
 A crusher buys soybeans and sells the meal and oil they yield. Since 2021, demand from biodiesel and renewable diesel has pushed soybean oil from about a third to about half of that product value, so the crush margin is now partly a fuel story. This app reads that story from public futures prices, in metric units, and says what it leaves out.
 
-![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart](docs/screenshot.png)
+![Soybean crush margin page: three cards for the crush margin, oil share and oil cost against diesel, each with its 5-year rank, above the crush margin chart and its risk strip with the VaR backtest line](docs/screenshot.png)
 
 ---
 
@@ -28,9 +28,9 @@ A crusher buys soybeans and sells the meal and oil they yield. Since 2021, deman
 The page repeats one shape three times: three cards of equal size, then one chart per card in the same order, each with its explanation beside it. Every chart has two views:
 
 - **History**: the series over 5 years, 10 years or all of it, with roll and delivery sessions in grey.
-- **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. The month in progress is a hollow dot, not joined to the line.
+- **By month**: the average of clean sessions for each calendar month, this year in bold against the years you pick (up to five) and the range of the five previous years. This year's legend entry reads "2026 (to date)", and the month in progress is a hollow dot, not joined to the line.
 
-The oil cost chart has a switch that adds the D4 RIN to the calculation. The third card always shows both numbers, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
+The oil cost chart has a switch that adds the D4 RIN to the calculation; the gap after the RIN is drawn in cyan, a colour no other line uses. The third card always shows both numbers, so it does not depend on the switch. Every number states its date and unit, and the page opens on the latest data with no button to press.
 
 ## How it is calculated
 
@@ -96,7 +96,7 @@ Backtest from 2021-11-17 to 2026-10-29, at 95%:
 | Filtered HS (shown) | 685 | 33 | 4.8% | 0.83 | 0.29 |
 | Plain HS, same window | 685 | 65 | 9.5% | <0.001 | <0.001 |
 
-Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version.
+Plain historical simulation fails both tests: a 5-year equal-weighted window lags volatility regimes, so its exceptions come too often and in clusters (Christoffersen p <0.001). That is why the page shows the filtered version. The page states its backtest in one line under the four risk cells, after a chip: "Holds" when both p-values are 0.05 or more, "Under-covers" when either is below.
 
 ### What the risk sample leaves out
 
@@ -196,6 +196,7 @@ soybean-crush-margin/
 ├── app.py                      # Streamlit page only
 ├── .streamlit/config.toml      # Dark theme
 ├── docs/screenshot.png         # README screenshot
+├── docs/{before,after}_*.png   # Full page with the D4 RIN on, at 1440, 1024 and 390 px
 ├── data/seed/                  # Dated copy of the EPA D4 RIN series, the fallback
 ├── src/
 │   ├── config.py               # Paths and cache settings

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
+from typing import Final
 
 from .risk import (
     ES_LEVEL,
@@ -16,12 +17,17 @@ from .risk import (
     NOTIONAL_TONNES,
     SHORT_VOL_CHANGES,
     VAR_LEVEL,
+    Backtest,
     RiskSummary,
 )
+from .seasonal import LOOKBACK_YEARS
 
 __all__ = [
+    "BACKTEST_SIGNIFICANCE",
     "Kpi",
     "MethodCard",
+    "backtest_fails",
+    "backtest_line",
     "kpi_row_html",
     "method_row_html",
     "ordinal",
@@ -31,6 +37,9 @@ __all__ = [
     "section_head_html",
     "split_bar_html",
 ]
+
+# A p-value under this rejects the VaR: too many exceptions, or exceptions that cluster.
+BACKTEST_SIGNIFICANCE: Final = 0.05
 
 
 @dataclass(frozen=True)
@@ -149,8 +158,34 @@ def _dollars(value: float) -> str:
     return f"{'−' if round(value) < 0 else ''}${abs(value):,.0f}"
 
 
-def risk_strip_html(summary: RiskSummary | None, note: str) -> str:
-    """The 1-day risk of the crush in one row of four cells, under its chart."""
+def _p_value(p: float) -> str:
+    return "< 0.01" if p < 0.01 else f"{p:.2f}"
+
+
+def backtest_fails(test: Backtest) -> bool:
+    """Either test rejects the VaR at the 5% level."""
+    return min(test.kupiec_p, test.christoffersen_p) < BACKTEST_SIGNIFICANCE
+
+
+def backtest_line(test: Backtest, template: str) -> str:
+    """The backtest sentence as plain text, filled only from ``test`` and the risk constants."""
+    return template.format(
+        years=LOOKBACK_YEARS,
+        exceptions=test.exceptions,
+        days=test.days,
+        rate=test.rate,
+        expected=1 - VAR_LEVEL,
+        kupiec=_p_value(test.kupiec_p),
+        independence=_p_value(test.christoffersen_p),
+    )
+
+
+def risk_strip_html(summary: RiskSummary | None, note: str, test_template: str) -> str:
+    """The 1-day risk of the crush in one row of four cells, under its chart.
+
+    When the summary has a backtest, a line under the cells states it, after a chip that
+    says whether the VaR holds; ``test_template`` is its copy, from ``src.text``.
+    """
     if summary is None:
         footer = f'<p class="cm-risk-note">{html.escape(note)}</p>'
         line = f"n/a: under {MIN_CHANGES} clean daily changes"
@@ -159,20 +194,30 @@ def risk_strip_html(summary: RiskSummary | None, note: str) -> str:
     # d.day, not %-d, which is not portable to Windows.
     as_of = f"As of {d.day} {d:%b %Y}, the last clean change. "
     footer = f'<p class="cm-risk-note">{html.escape(as_of + note)}</p>'
+    if summary.backtest is not None:
+        fails = backtest_fails(summary.backtest)
+        chip = (
+            f'<span class="cm-chip cm-chip-{"fail" if fails else "pass"}">'
+            f"{'Under-covers' if fails else 'Holds'}</span>"
+        )
+        text = html.escape(backtest_line(summary.backtest, test_template))
+        footer = f'<p class="cm-risk-test">{chip} {text}</p>{footer}'
+    # Each leg stays on one line, so a narrow cell breaks only between legs.
     legs = " · ".join(
-        f"{leg} {_signed_percent(share)}" for leg, share in summary.contributions.items()
+        f'<span class="cm-leg">{html.escape(f"{leg} {_signed_percent(share)}")}</span>'
+        for leg, share in summary.contributions.items()
     )
     cells = [
         (
             f"Daily σ, last {SHORT_VOL_CHANGES} changes / 1 year",
-            f"${summary.vol_20:,.2f}/t / ${summary.vol_1y:,.2f}/t",
+            html.escape(f"${summary.vol_20:,.2f}/t / ${summary.vol_1y:,.2f}/t"),
         ),
-        (f"1-day VaR {VAR_LEVEL:.0%}, {NOTIONAL_TONNES:,} t", _dollars(summary.var)),
-        (f"ES {ES_LEVEL:.1%}", _dollars(summary.es)),
+        (f"1-day VaR {VAR_LEVEL:.0%}, {NOTIONAL_TONNES:,} t", html.escape(_dollars(summary.var))),
+        (f"ES {ES_LEVEL:.1%}", html.escape(_dollars(summary.es))),
         ("Risk by leg", legs),
     ]
     rows = "".join(
-        f'<div class="cm-risk-cell"><dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd></div>'
+        f'<div class="cm-risk-cell"><dt>{html.escape(label)}</dt><dd>{value}</dd></div>'
         for label, value in cells
     )
     return f'<div class="cm-risk"><dl>{rows}</dl>{footer}</div>'

@@ -12,6 +12,7 @@ __all__ = ["APP_CSS"]
 # the bottom padding its floating badge, which covered the last card on a phone.
 # The risk strip labels keep their case: uppercase would turn σ into Σ.
 # In Streamlit 1.66 stButtonGroup is a block; the row of chips is its child div, so wrap that.
+# Its element container shrinks to the chips, so the view switch moves right by its margin.
 APP_CSS: Final[str] = """<style>
 :root{--page:#0b1016;--card:#141b23;--raised:#1e2732;--line:#2a3440;--ink:#eef2f6;--mut:#a3afbd;--head:linear-gradient(115deg,#1a2430 0%,#16212c 55%,#3a2c10 100%);--crush:#c58512;--oil:#4d8fe8;--meal:#c76fae;--step:rgba(255,255,255,.07)}
 [data-testid='stMainBlockContainer']{max-width:1480px;margin:0 auto;padding:3.75rem 2rem 5rem}
@@ -61,12 +62,11 @@ APP_CSS: Final[str] = """<style>
 .cm-head p+p{margin-top:.3rem;font-size:.9375rem;line-height:1.4;color:var(--ink)}
 [class*='st-key-bar-']{min-height:40px;align-items:center;flex-wrap:wrap}
 .st-key-rin-gap{margin-left:auto}
-[class*='st-key-view-'] [data-testid='stButtonGroup']{justify-content:flex-end}
 [class*='st-key-body-'] [data-testid='stHorizontalBlock']{align-items:stretch}
 .cm-rail{height:400px;box-sizing:border-box;display:flex;flex-direction:column;gap:.75rem;border-left:1px solid var(--line);padding-left:1rem;font-size:.8125rem;line-height:1.45;color:var(--ink);overflow:hidden}
 .cm-rail h3{font-size:.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);margin:0 0 .2rem;padding:0}
 .cm-rail p{margin:0}
-.cm-today{margin-top:auto}
+.cm-today{padding-top:.6rem;border-top:1px solid var(--line)}
 .cm-today dl{display:grid;grid-template-columns:1fr auto;gap:.25rem .75rem;margin:0;padding:0}
 .cm-today dt{margin:0;padding:0;color:var(--mut)}
 .cm-today dd{margin:0;padding:0;text-align:right;font-variant-numeric:tabular-nums}
@@ -76,6 +76,11 @@ APP_CSS: Final[str] = """<style>
 .cm-risk dt{margin:0 0 .2rem;padding:0;font-size:.75rem;font-weight:500;color:var(--mut)}
 .cm-risk dd{margin:0;padding:0;font-size:.9375rem;font-weight:600;font-variant-numeric:tabular-nums}
 .cm-risk-na{margin:0;font-size:.875rem;color:var(--mut)}
+.cm-leg{white-space:nowrap}
+.cm-risk-test{margin:.6rem 0 0;font-size:.8125rem;line-height:1.4;color:var(--ink)}
+.cm-chip{display:inline-block;font-size:.6875rem;font-weight:600;letter-spacing:.03em;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--line);margin-right:.4rem;vertical-align:1px}
+.cm-chip-fail{border-color:var(--crush);color:var(--crush)}
+.cm-chip-pass{color:var(--mut)}
 .cm-risk-note{margin:.6rem 0 0;font-size:.78rem;line-height:1.35;color:var(--mut)}
 .cm-method{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .cm-method section{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--line);border-radius:10px;padding:.9rem 1rem}
@@ -86,10 +91,13 @@ APP_CSS: Final[str] = """<style>
 [data-testid='stCaptionContainer']{opacity:1}
 [data-testid='stCaptionContainer'] p{color:var(--mut)}
 [data-testid='stCaptionContainer'] a{color:var(--ink)}
+@media (min-width:1025px){
+ [class*='st-key-view-']{margin-left:auto}
+}
 @media (max-width:1279px){
  [class*='st-key-body-'] [data-testid='stColumn']{min-width:100%}
  .cm-rail{height:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;border-left:0;border-top:1px solid var(--line);padding:.75rem 0 0}
- .cm-today{margin-top:0}
+ .cm-today{padding-top:0;border-top:0}
 }
 @media (max-width:1024px){
  .cm-hero{grid-template-columns:1fr;gap:.75rem}
@@ -114,7 +122,8 @@ APP_CSS: Final[str] = """<style>
  .cm-q{font-size:1rem}
  .cm-steps{display:none}
  [class*='st-key-card-sec']{padding:.7rem .8rem}
- .cm-risk dl{grid-template-columns:1fr}
+ .cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .cm-risk-cell:last-child{grid-column:1/-1}
  [data-testid='stPlotlyChart'] .nsewdrag{pointer-events:none}
  [data-testid='stPlotlyChart'] .modebar-container{display:none}
 }

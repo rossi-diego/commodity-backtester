@@ -16,10 +16,10 @@ from streamlit.testing.v1 import AppTest
 
 from src import config, visualization
 from src.cards import risk_strip_html
-from src.margins import crush_table
+from src.margins import RIN_TOLERANCE, crush_table
 from src.risk import risk_summary
 from src.seasonal import latest_reading
-from src.text import RISK_NOTE
+from src.text import BACKTEST_LINE, RISK_NOTE
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -173,7 +173,49 @@ class TestFirstLoad:
         assert _y_title(app, "gap") == "Oil − heating oil − RIN, USD/m³"
         assert json.loads(_chart(app, "gap"))["layout"]["yaxis"]["dtick"] == 250
         assert "Before the RIN" in _chart(app, "gap")
-        assert "Oil cost vs diesel With the D4 RIN," in _head(app, "gap")
+        assert "Oil cost vs diesel With the D4 RIN held at the EPA week of" in _head(app, "gap")
+
+    def test_gap_after_the_rin_is_drawn_in_cyan(self, app) -> None:
+        app.run()
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        traces = json.loads(_chart(app, "gap"))["data"]
+        main = next(trace for trace in traces if trace.get("name") == "After the D4 RIN")
+        assert main["line"]["color"] == visualization.RIN
+        app.button_group(key="view-gap").set_value("By month").run()
+        year = pd.Timestamp.today().year
+        traces = json.loads(_chart(app, "gap"))["data"]
+        current = next(trace for trace in traces if trace.get("name") == f"{year} (to date)")
+        assert current["line"]["color"] == visualization.RIN
+
+    def test_held_rin_sentence_names_the_week_and_does_not_rank(self, app) -> None:
+        """The seed D4 ends weeks before the fixture's prices, so the latest RIN is held."""
+        seed = pd.read_csv(config.RIN_SEED)
+        week = pd.Timestamp(seed["week"].iloc[-1])
+        assert pd.Timestamp.today().normalize() - week > RIN_TOLERANCE
+        app.run()
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        head = _head(app, "gap")
+        assert f"With the D4 RIN held at the EPA week of {week.day} {week:%b}, " in head
+        assert head.rstrip().endswith("Not ranked while the price is held.")
+        assert "higher than" not in head
+        assert "lower than" not in head
+
+    def test_fresh_rin_sentence_keeps_the_rank(self, app, monkeypatch, tmp_path) -> None:
+        weeks = pd.date_range("2010-07-05", pd.Timestamp.today(), freq="W-MON")
+        fresh = tmp_path / "fresh.csv"
+        pd.DataFrame({"week": weeks.strftime("%Y-%m-%d"), "usd_per_rin": 1.5}).to_csv(
+            fresh, index=False
+        )
+        monkeypatch.setattr(config, "RIN_SEED", fresh)
+        app.run()
+        app.toggle(key="rin-gap").set_value(True).run()
+        _no_exceptions(app)
+        head = _head(app, "gap")
+        assert "Oil cost vs diesel With the D4 RIN, " in head
+        assert "Not ranked" not in head
+        assert re.search(r"higher than \d+% of clean days in the past 5 years", head)
 
     def test_page_works_without_any_rin_data(self, app, monkeypatch, tmp_path) -> None:
         monkeypatch.setattr(config, "RIN_SEED", tmp_path / "missing.csv")
@@ -206,8 +248,12 @@ class TestFirstLoad:
         summary = risk_summary(crush_table(synthetic_prices))
         assert summary is not None
         strip = _block(app, 'class="cm-risk"')
-        assert strip == risk_strip_html(summary, RISK_NOTE)
+        assert strip == risk_strip_html(summary, RISK_NOTE, BACKTEST_LINE)
         assert strip.count('class="cm-risk-cell"') == 4
+        assert summary.backtest is not None
+        assert strip.count('class="cm-risk-test"') == 1
+        assert strip.index('class="cm-risk-test"') > strip.index("</dl>")
+        assert strip.index('class="cm-risk-test"') < strip.index('class="cm-risk-note"')
         assert f"${summary.var:,.0f}" in strip
         assert _html(app).count('class="cm-risk"') == 1
 
@@ -240,7 +286,7 @@ class TestControls:
         year = pd.Timestamp.today().year
         spec = _chart(app, key)
         names = [trace.get("name") for trace in json.loads(spec)["data"]]
-        for name in (str(year), str(year - 1), str(year - 2)):
+        for name in (f"{year} (to date)", str(year - 1), str(year - 2)):
             assert name in names
         assert "Range" in names
         assert "against" in _head(app, key) or "too few" in _head(app, key)
@@ -476,6 +522,12 @@ class TestSource:
     def test_option_chips_wrap_on_a_phone(self) -> None:
         phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
         assert "[class*='st-key-bar-'] [data-testid='stButtonGroup']" in phone
+
+    def test_risk_grid_is_two_by_two_on_a_phone(self) -> None:
+        phone = CSS.split("@media (max-width:640px){", 1)[1].split("\n}", 1)[0]
+        assert ".cm-risk dl{grid-template-columns:repeat(2,minmax(0,1fr))}" in phone
+        assert ".cm-risk-cell:last-child{grid-column:1/-1}" in phone
+        assert ".cm-leg{white-space:nowrap}" in CSS
         assert ".cm-nowrap{white-space:nowrap}" in CSS
 
 
@@ -495,7 +547,8 @@ class TestDarkTheme:
             theme = tomllib.load(file)["theme"]
         assert theme["primaryColor"] != tokens["crush"]
         rules = [line for line in CSS.splitlines() if "var(--crush)" in line]
-        assert rules and all(line.startswith(".cm-kpi-crush") for line in rules)
+        # The one exception is a failed VaR backtest, flagged in the crush strip without red.
+        assert rules and all(line.startswith((".cm-kpi-crush", ".cm-chip-fail")) for line in rules)
         risk = [line for line in CSS.splitlines() if ".cm-risk" in line]
         assert risk and not any("--crush" in line for line in risk)
 

@@ -65,6 +65,13 @@ RISK_NOTE: Final[str] = (
     "volatility. Delivery and roll days, which move more, are left out. Long 1,000 t board crush."
 )
 
+# The backtest line in the same strip, at most 30 words once filled by
+# ``cards.backtest_line`` from a Backtest and the risk constants; p-values arrive as text.
+BACKTEST_LINE: Final[str] = (
+    "Backtest, {years} years: {exceptions} of {days:,} changes beyond the VaR ({rate:.1%}, "
+    "{expected:.0%} expected); Kupiec p {kupiec}, independence p {independence}."
+)
+
 METHOD: Final[list[MethodCard]] = [
     MethodCard(
         "How it is calculated",

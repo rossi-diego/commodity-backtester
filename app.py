@@ -37,6 +37,7 @@ from src.seasonal import (
 )
 from src.styles import APP_CSS
 from src.text import (
+    BACKTEST_LINE,
     FULL_METHOD,
     LINKEDIN_URL,
     METHOD,
@@ -48,7 +49,7 @@ from src.text import (
     SCOPE,
     WHAT,
 )
-from src.visualization import CRUSH, INK_SERIES, MONTHS, OIL, by_month_figure, history_figure
+from src.visualization import CRUSH, INK_SERIES, MONTHS, OIL, RIN, by_month_figure, history_figure
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -418,7 +419,7 @@ def _crush_section(table: pd.DataFrame, reading: Reading, risk: RiskSummary | No
         "Crush margin",
         body,
         _past_years(table.index, reading.latest_date.year),
-        footer=risk_strip_html(risk, RISK_NOTE),
+        footer=risk_strip_html(risk, RISK_NOTE, BACKTEST_LINE),
     )
 
 
@@ -485,15 +486,15 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
         rin_on = c.rin and has_rins
         column = "after_rin" if rin_on else "gap"
         y_title = "Oil − heating oil − RIN, USD/m³" if rin_on else "Oil − heating oil, USD/m³"
-        color = OIL if rin_on else INK_SERIES
+        color = RIN if rin_on else INK_SERIES
         flagged = table["flagged"] | (table["rin_held"] if rin_on else False)
         if c.view == "History":
             shown = _window(table, c.window)
             held = None
             reference = None
+            week = pd.Timestamp(rins.as_of) if rins.as_of is not None else reading.date
             if rin_on:
                 last = float(rins.prices.iloc[-1]) if rins.prices is not None else 0.0
-                week = pd.Timestamp(rins.as_of) if rins.as_of is not None else reading.date
                 held = (f"D4 held at ${last:.2f} (week of {week.day} {week:%b})", shown["rin_held"])
                 reference = ("Before the RIN", shown["gap"])
             fig = history_figure(
@@ -513,6 +514,11 @@ def _gap_section(table: pd.DataFrame, reading: Reading, rins: RinResult) -> None
                 ranked = latest_reading(table[column], table["flagged"], unranked=table["rin_held"])
                 assert ranked is not None
                 sentence = f"With the D4 RIN, {_after_words(ranked.value)}, {_rank_clause(ranked)}."
+                if bool(table.loc[ranked.date, "rin_held"]):
+                    sentence = (
+                        f"With the D4 RIN held at the EPA week of {week.day} {week:%b}, "
+                        f"{_after_words(ranked.value)}. Not ranked while the price is held."
+                    )
                 return SectionBody(sentence, fig, READING_RIN, today)
             side = "more" if reading.value >= 0 else "less"
             sentence = (

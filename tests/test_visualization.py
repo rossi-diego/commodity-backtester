@@ -15,13 +15,16 @@ from src.seasonal import monthly_means
 from src.visualization import (
     AXIS,
     CRUSH,
+    CURRENT_LEGEND_PX,
     FLAT,
     GRID,
     INK_SERIES,
+    LEGEND_ENTRY_PX,
     MEAL,
     MONTHS,
     MUTED,
     OIL,
+    RIN,
     ROLL,
     SURFACE,
     YEAR_COLORS,
@@ -32,7 +35,11 @@ from src.visualization import (
     history_figure,
 )
 
-TOKENS = {SURFACE, INK_SERIES, MUTED, GRID, AXIS, CRUSH, OIL, MEAL, FLAT, *YEAR_COLORS}
+TOKENS = {SURFACE, INK_SERIES, MUTED, GRID, AXIS, CRUSH, OIL, MEAL, FLAT, RIN, *YEAR_COLORS}
+# The line colours the RIN cyan must stay apart from.
+LINES = {"CRUSH": CRUSH, "OIL": OIL, "MEAL": MEAL, "INK_SERIES": INK_SERIES, "FLAT": FLAT} | {
+    f"YEAR_COLORS[{i}]": color for i, color in enumerate(YEAR_COLORS)
+}
 HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
 
 
@@ -44,6 +51,43 @@ def tables(synthetic_prices) -> tuple[pd.DataFrame, pd.DataFrame]:
     # EPA weeks stop five weeks before the prices, as they do in production.
     d4 = pd.Series(1.5, index=pd.date_range("2010-07-05", gap.index[-36], freq="W-MON"))
     return crush_table(prices), add_rins(gap, d4)
+
+
+def _linear(color: str) -> tuple[float, float, float]:
+    """sRGB ``#rrggbb`` as linear RGB."""
+    channels = (int(color[i : i + 2], 16) / 255 for i in (1, 3, 5))
+    r, g, b = (c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels)
+    return r, g, b
+
+
+def _luminance(color: str) -> float:
+    r, g, b = _linear(color)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(first: str, second: str) -> float:
+    """WCAG 2 contrast ratio."""
+    high, low = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def _lab(color: str) -> tuple[float, float, float]:
+    """CIELAB under D65."""
+    r, g, b = _linear(color)
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+
+    def f(t: float) -> float:
+        return t ** (1 / 3) if t > 216 / 24389 else (24389 / 27 * t + 16) / 116
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
+
+
+def _delta_e(first: str, second: str) -> float:
+    """CIE76 colour difference."""
+    return float(np.linalg.norm(np.subtract(_lab(first), _lab(second))))
 
 
 def _trace(fig, name: str):
@@ -205,7 +249,7 @@ class TestByMonth:
         crush, _ = tables
         fig, _ = _by_month(crush)
         year = crush.index[-1].year
-        current = _trace(fig, str(year))
+        current = _trace(fig, f"{year} (to date)")
         assert current.line.color == CRUSH
         assert current.line.width > _trace(fig, str(year - 1)).line.width
         assert _trace(fig, str(year - 1)).line.color == YEAR_COLORS[0]
@@ -215,8 +259,27 @@ class TestByMonth:
         assert CRUSH not in past
         assert list(current.x) == MONTHS
         assert fig.layout.legend.traceorder == "reversed"
-        lines = [name for name in _names(fig) if name and name.isdigit()]
-        assert lines == [str(year - 3), str(year - 2), str(year - 1), str(year)]
+        lines = [name for name in _names(fig) if name and name[:4].isdigit()]
+        assert lines == [str(year - 3), str(year - 2), str(year - 1), f"{year} (to date)"]
+
+    def test_current_year_is_named_to_date_only_with_a_month_in_progress(self, tables) -> None:
+        crush, _ = tables
+        year = crush.index[-1].year
+        fig, _ = _by_month(crush, month_to_date=None)
+        assert str(year) in _names(fig)
+        assert f"{year} (to date)" not in _names(fig)
+        assert "To date" not in _names(fig)
+
+    def test_past_years_draw_in_year_colours_solid(self, tables) -> None:
+        """Picked years one to five back are solid, in YEAR_COLORS, never the grey of the band."""
+        crush, _ = tables
+        year = crush.index[-1].year
+        fig, _ = _by_month(crush, years=[year - n for n in range(1, 6)])
+        for n in range(1, 6):
+            line = _trace(fig, str(year - n)).line
+            assert line.color == YEAR_COLORS[n - 1]
+            assert line.dash is None
+            assert line.color != FLAT
 
     def test_a_year_keeps_its_colour_whichever_others_are_picked(self, tables) -> None:
         crush, _ = tables
@@ -232,9 +295,12 @@ class TestByMonth:
         crush = tables[0]
         fig, means = _by_month(crush)
         month, year = crush.index[-1].month, crush.index[-1].year
-        line = np.asarray(_trace(fig, str(year)).y, dtype=float)
+        line = np.asarray(_trace(fig, f"{year} (to date)").y, dtype=float)
         assert np.isnan(line[month - 1])
         marker = _trace(fig, "To date")
+        # The year's "(to date)" entry names the marker, which shares its legend group.
+        assert marker.showlegend is False
+        assert marker.legendgroup == _trace(fig, f"{year} (to date)").legendgroup
         assert f"<extra>{MONTHS[month - 1]} to date</extra>" in marker.hovertemplate
         assert marker.y[0] == pytest.approx(means.loc[month, year])
         assert marker.marker.color == SURFACE
@@ -265,8 +331,14 @@ class TestByMonth:
         # Three entries to a row on a phone: a fixed entry width that every name fits.
         assert fig.layout.legend.entrywidth == 36
         assert fig.layout.legend.entrywidthmode == "pixels"
-        shown = [t.name for t in fig.data if t.showlegend is not False]
-        assert max(len(name) for name in shown) <= len("To date")
+        shown = [t for t in fig.data if t.showlegend is not False]
+        year = tables[0].index[-1].year
+        current = _trace(fig, f"{year} (to date)")
+        assert current.legendwidth == CURRENT_LEGEND_PX
+        others = [t.name for t in shown if t is not current]
+        assert max(len(name) for name in others) <= 7
+        # 7 characters fit 36 px at 10.5 px, so 14 fit the current year's own width.
+        assert len(current.name) / 7 * LEGEND_ENTRY_PX <= CURRENT_LEGEND_PX
         assert fig.layout.xaxis.tickangle == 0
         history = _figures(tables)[0]
         assert history.layout.legend.y > 1
@@ -280,6 +352,21 @@ class TestColour:
     def test_no_hex_outside_tokens(self, tables) -> None:
         for fig in _figures(tables):
             assert _hex_colors(fig) <= TOKENS
+
+    def test_rin_cyan_is_its_own_colour(self) -> None:
+        assert RIN not in LINES.values()
+        assert YEAR_COLORS == ("#2bb39b", "#a98bf0", "#86b83a", "#e5664c", "#d86fb0")
+
+    @pytest.mark.parametrize("name", list(LINES))
+    def test_rin_cyan_is_far_from_every_other_line(self, name) -> None:
+        assert _delta_e(RIN, LINES[name]) >= 30, name
+
+    def test_rin_cyan_reads_on_the_surface(self) -> None:
+        assert _contrast(RIN, SURFACE) >= 4.5
+
+    def test_delta_e_helper_matches_known_values(self) -> None:
+        assert _delta_e("#000000", "#ffffff") == pytest.approx(100, abs=0.05)
+        assert _delta_e(RIN, RIN) == 0
 
     def test_one_y_axis_everywhere(self, tables) -> None:
         for fig in _figures(tables):
