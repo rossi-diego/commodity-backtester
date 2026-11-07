@@ -39,6 +39,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ANN"]   # no annotation enforcement in test files
+"app.py" = ["E402"]   # src is imported after the stale-module check
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
